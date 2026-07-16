@@ -1,11 +1,17 @@
-(async () => {
-  const src = chrome.runtime.getURL("js/const.mjs");
-  const { debugLogger, storageSettingMap, defaultIgnoreSites } = await import(
-    src
-  );
-  // import {debugLogger, storageSettingMap, defaultIgnoreSites} from './const.mjs'
+import {
+  debugLogger,
+  storageSettingMap,
+  defaultIgnoreSites,
+  getExtensionSettings,
+  playAudio,
+  SETTINGS_KEY,
+} from './const.mjs';
 
-  const storage = {};
+// Content script entry (ES module). Safari gets an IIFE bundle of this file.
+// Default settings immediately so double-click works before storage returns.
+const storage = Object.assign({}, storageSettingMap);
+  /** Clear "查询中" watchdog when a final result arrives */
+  let lookupLoadingTimer = null;
   /** 当前选区的父级body
    * @type {DOM(body) | null}
    * */
@@ -17,17 +23,18 @@
   const popoverWidth = 280;
 
   /**
-   * 从chrome的storage里获取存储的插件的设置，如果有值，就给storage赋值，否者就使用默认的storageSettingMap
+   * 从 chrome.storage 获取插件设置（sync 优先，Safari 等环境回退 local）
    * */
-  chrome.storage.sync.get("__shanbayExtensionSettings", (settings) => {
-    debugLogger("info", "chrome storage loaded");
-    if (Object.keys(settings).length) {
-      settings.__shanbayExtensionSettings.forEach((item) => {
+  getExtensionSettings((settings) => {
+    debugLogger("info", "chrome storage loaded", settings);
+    if (settings[SETTINGS_KEY] && Object.keys(settings[SETTINGS_KEY]).length) {
+      settings[SETTINGS_KEY].forEach((item) => {
         Object.assign(storage, item);
       });
-    } else {
-      Object.assign(storage, storageSettingMap);
     }
+    // Ensure required defaults if missing from stored settings
+    if (storage.clickLookup === undefined) storage.clickLookup = true;
+    if (storage.contextLookup === undefined) storage.contextLookup = true;
   });
 
   /**
@@ -35,7 +42,9 @@
    * */
   chrome.storage.onChanged.addListener(function (changes) {
     debugLogger("info", "chrome storage changed");
-    changes.__shanbayExtensionSettings.newValue.forEach((item) => {
+    const change = changes[SETTINGS_KEY];
+    if (!change || !change.newValue) return;
+    change.newValue.forEach((item) => {
       Object.assign(storage, item);
     });
   });
@@ -60,8 +69,11 @@
     if (!_selection.rangeCount) return;
     let _range = getSelection().getRangeAt(0);
     selectionRange = _range;
-    if (event && storage.clickLookup) {
-      selectionParentBody = event.target.getRootNode().body;
+    if (event && storage.clickLookup !== false) {
+      const root = event.target && event.target.getRootNode
+        ? event.target.getRootNode()
+        : document;
+      selectionParentBody = (root && root.body) || document.body;
       let matchResult = getSelection()
         .toString()
         .trim()
@@ -69,13 +81,52 @@
       if (matchResult) {
         popover({ loading: true, msg: "查询中...." });
         debugLogger("info", "get word: ", matchResult[0]);
-        chrome.runtime.sendMessage({
-          action: "lookup",
-          word: matchResult[0],
-        });
+        if (lookupLoadingTimer) clearTimeout(lookupLoadingTimer);
+        // Never leave "查询中" forever (Safari async reply can drop)
+        lookupLoadingTimer = setTimeout(() => {
+          lookupLoadingTimer = null;
+          popover({
+            loading: false,
+            data: {
+              status: 504,
+              msg: "查询超时：请打开 web.shanbay.com 并登录，保持标签页打开后重试",
+            },
+          });
+        }, 16000);
+
+        chrome.runtime.sendMessage(
+          {
+            action: "lookup",
+            word: matchResult[0],
+          },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              debugLogger(
+                "warn",
+                "lookup message failed:",
+                chrome.runtime.lastError.message
+              );
+              // Final result may still arrive via onMessage
+              return;
+            }
+            // lookupPending is just an ack — wait for final lookup via onMessage
+            if (response && response.action === "lookupPending") return;
+            if (response && response.action === "lookup") {
+              if (lookupLoadingTimer) {
+                clearTimeout(lookupLoadingTimer);
+                lookupLoadingTimer = null;
+              }
+              popover({ loading: false, data: response.data });
+            }
+          }
+        );
       }
     } else {
-      selectionParentBody = _range.startContainer.ownerDocument.body;
+      selectionParentBody =
+        (_range.startContainer &&
+          _range.startContainer.ownerDocument &&
+          _range.startContainer.ownerDocument.body) ||
+        document.body;
     }
   };
 
@@ -166,7 +217,7 @@
         };
 
       } catch (e) {
-        console.error("Error calculating textarea rect", e);
+        debugLogger("error", "Error calculating textarea rect", e);
         return rect;
       }
     }
@@ -323,6 +374,13 @@
     </div>`;
 
     /** 这里是为了防止多次调用popover产生多个弹出框的。因为一次查询最起码会调用两次popover*/
+    if (!selectionParentBody) {
+      selectionParentBody = document.body;
+    }
+    if (!selectionParentBody) {
+      debugLogger("warn", "no document.body to attach popover");
+      return;
+    }
     if (!document.querySelector("#__shanbay-popover")) {
       selectionParentBody.insertAdjacentHTML("beforeEnd", html);
     }
@@ -332,77 +390,180 @@
     if (res.loading) {
       /** 查询之前和未登录的提示信息*/
       mainContainer.querySelector("#shanbay-title").innerHTML = res.msg;
-    } else if (res.data.msg) {
+      // Must position + remove .invisible or the loading bubble stays hidden
+      try {
+        calculatePopoverPosition();
+      } catch (e) {
+        mainContainer.classList.remove("invisible");
+        mainContainer.style.top = window.scrollY + 80 + "px";
+        mainContainer.style.left = window.scrollX + 80 + "px";
+      }
+    } else if (res.data && res.data.msg) {
       mainContainer.querySelector("#shanbay-inner").innerHTML = `
     <div id="shanbay-title" class="has-error">
       <div class="error-message">${res.data.msg}</div>
-      ${[400, 401, 403].includes(res.data.status) ? '<div class="login"><a href="https://web.shanbay.com/web/account/login/" target="_blank" class="shanbay-btn">去登录</a></div>' : ""}
+      ${[400, 401, 403, 404].includes(res.data.status) || (res.data.msg && /登录|过期/.test(res.data.msg)) ? '<div class="login"><a href="https://web.shanbay.com/web/account/login/" target="_blank" class="shanbay-btn">去登录</a></div>' : ""}
     </div>`;
+      try {
+        calculatePopoverPosition();
+      } catch (e) {
+        mainContainer.classList.remove("invisible");
+      }
+    } else if (!res.data) {
+      mainContainer.querySelector("#shanbay-title").innerHTML = "查询无结果";
+      try {
+        calculatePopoverPosition();
+      } catch (e) {
+        mainContainer.classList.remove("invisible");
+      }
     } else {
       /** 查询单词或者单词其他操作成功*/
       let data = res.data;
+      const esc = (s) =>
+        String(s == null ? "" : s)
+          .replace(/&/g, "&amp;")
+          .replace(/"/g, "&quot;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
       const assemblyPronunciationStr = () => {
-        if (!data.audios.length) return "";
+        if (!data.audios || !data.audios.length) {
+          debugLogger("warn", "no audios[] on word result");
+          return "";
+        }
         let str = "";
-        if (data.audios[0].uk) {
-          str += "<div>";
-          str += `<span>uk: </span><small>/${data.audios[0].uk.ipa}/</small> `;
-          if (data.audios[0].uk.urls.length)
-            str += `<span class="speaker uk" data-target="${data.audios[0].uk.urls[0]}"></span> `;
+        const first = data.audios[0] || {};
+        const ukUrl =
+          first.uk && first.uk.urls && first.uk.urls[0]
+            ? first.uk.urls[0]
+            : "";
+        const usUrl =
+          first.us && first.us.urls && first.us.urls[0]
+            ? first.us.urls[0]
+            : "";
+        if (first.uk) {
+          str += "<div class='pron-row'>";
+          str += `<span>uk: </span><small>/${esc(first.uk.ipa || "")}/</small> `;
+          if (ukUrl) {
+            str += `<span class="speaker uk" data-target="${esc(ukUrl)}" title="Play UK" role="button" tabindex="0"></span> `;
+          }
           str += "</div>";
         }
-        if (data.audios[0].us) {
-          str += "<div>";
-          str += `<span>us: </span><small>/${data.audios[0].us.ipa}/</small> `;
-          if (data.audios[0].us.urls.length)
-            str += `<span class="speaker us" data-target="${data.audios[0].us.urls[0]}"></span> `;
+        if (first.us) {
+          str += "<div class='pron-row'>";
+          str += `<span>us: </span><small>/${esc(first.us.ipa || "")}/</small> `;
+          if (usUrl) {
+            str += `<span class="speaker us" data-target="${esc(usUrl)}" title="Play US" role="button" tabindex="0"></span> `;
+          }
           str += "</div>";
+        }
+        if (!ukUrl && !usUrl) {
+          debugLogger("warn", "audios present but no uk/us urls", first);
         }
         return str;
       };
-      let contentHtml = `
+
+      // Safe definition lists (API shape can vary / miss fields)
+      const defs = data.definitions || {};
+      const cnDefs = Array.isArray(defs.cn) ? defs.cn : [];
+      const enDefs = Array.isArray(defs.en) ? defs.en : [];
+      const cnHtml =
+        storage.paraphrase !== "English" && cnDefs.length
+          ? `<div><b>中文：</b> ${cnDefs
+              .map(
+                (p) =>
+                  `<div><span style="color: #333">${esc(p.pos)} </span><span>${esc(p.def)}</span></div>`
+              )
+              .join("")}</div>`
+          : "";
+      const enHtml =
+        storage.paraphrase !== "Chinese" && enDefs.length
+          ? `<div><b>英文：</b>${enDefs
+              .map(
+                (p) =>
+                  `<div><span style="color: #333">${esc(p.pos)} </span><span>${esc(p.def)}</span></div>`
+              )
+              .join("")}</div>`
+          : "";
+
+      let contentHtml = "";
+      try {
+        contentHtml = `
       <div id="shanbay-title">
-          <span class="word">${data.content}</span>
-          <a class="check-detail" href="https://web.shanbay.com/wordsweb/#/detail/${data.id}" target="_blank"> 查看详情 </a>
+          <span class="word">${esc(data.content)}</span>
+          <a class="check-detail" href="https://web.shanbay.com/wordsweb/#/detail/${esc(data.id)}" target="_blank"> 查看详情 </a>
           <div class="phonetic-symbols">${assemblyPronunciationStr()}</div>
       </div>
       <div id="shanbay-content">
           <div class="simple-definition">
-              ${storage.paraphrase !== "English" ? (data.definitions.cn.length ? `<div><b>中文：</b> ${data.definitions.cn.map((p) => `<div><span style="color: #333">${p.pos} </span><span>${p.def}</span></div>`).join("")}</div>` : "") : ""}
-              ${storage.paraphrase !== "Chinese" ? (data.definitions.en.length ? `<div><b>英文：</b>${data.definitions.en.map((p) => `<div><span style="color: #333">${p.pos} </span><span>${p.def}</span></div>`).join("")}</div>` : "") : ""}
+              ${cnHtml}
+              ${enHtml}
           </div>
           <div id="shanbay-example-sentence-div" class="hide"></div>
           <div id="shanbay-footer">
-            <span id="shanbay-example-sentence-span" class="hide"><button id="shanbay-example-sentence-btn" class="shanbay-btn">查看例句</button></span>
-            ${data.exists === "error" ? "" : `<span id="shanbay-add-word-span"><button id="shanbay-add-word-btn" class="shanbay-btn ${data.exists ? "forget" : ""}">${data.exists ? "我忘了" : "添加"}</button></span>`}
+            <span id="shanbay-example-sentence-span" class="hide"><button type="button" id="shanbay-example-sentence-btn" class="shanbay-btn">查看例句</button></span>
+            ${data.exists === "error" ? "" : `<span id="shanbay-add-word-span"><button type="button" id="shanbay-add-word-btn" class="shanbay-btn ${data.exists ? "forget" : ""}">${data.exists ? "我忘了" : "添加"}</button></span>`}
           </div>
       </div>
     `;
+      } catch (buildErr) {
+        debugLogger("error", "build popover HTML failed", buildErr);
+        contentHtml = `<div id="shanbay-title" class="has-error"><div class="error-message">渲染失败: ${esc(buildErr && buildErr.message)}</div></div>`;
+      }
 
       mainContainer.querySelector("#shanbay-inner").innerHTML = contentHtml;
 
-      calculatePopoverPosition();
+      try {
+        calculatePopoverPosition();
+      } catch (posErr) {
+        debugLogger("warn", "calculatePopoverPosition failed", posErr);
+        mainContainer.classList.remove("invisible");
+      }
 
-      /** 各种事件的处理*/
-      /** 发音事件的处理 */
-      Array.from(mainContainer.querySelectorAll(".speaker")).forEach(
-        (speaker) => {
-          if (
-            speaker.classList.contains(data.__shanbayExtensionSettings.autoRead)
-          ) {
-            chrome.runtime.sendMessage({
-              action: "playSound",
-              url: speaker.dataset.target,
-            });
-          }
-          speaker.addEventListener("click", function () {
-            chrome.runtime.sendMessage({
-              action: "playSound",
-              url: this.dataset.target,
-            });
-          });
-        },
-      );
+      /** 发音：event delegation on popover root */
+      if (!mainContainer.__shanbayAudioDelegated) {
+        mainContainer.__shanbayAudioDelegated = true;
+        mainContainer.addEventListener(
+          "click",
+          function (e) {
+            const btn =
+              e.target && e.target.closest
+                ? e.target.closest(".speaker")
+                : null;
+            if (!btn || !mainContainer.contains(btn)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+            const now = Date.now();
+            if (
+              mainContainer.__shanbayLastPlay &&
+              now - mainContainer.__shanbayLastPlay < 400
+            ) {
+              return;
+            }
+            mainContainer.__shanbayLastPlay = now;
+            const src =
+              btn.getAttribute("data-target") || btn.dataset.target || "";
+            if (!src) {
+              debugLogger("error", "speaker click but data-target empty");
+              return;
+            }
+            playAudio(src);
+          },
+          true
+        );
+      }
+
+      const autoRead =
+        data.__shanbayExtensionSettings &&
+        data.__shanbayExtensionSettings.autoRead;
+      if (autoRead && autoRead !== "false") {
+        const autoBtn = mainContainer.querySelector(".speaker." + autoRead);
+        if (autoBtn) {
+          playAudio(
+            autoBtn.getAttribute("data-target") || autoBtn.dataset.target
+          );
+        }
+      }
 
       const exampleSentenceBtn = mainContainer.querySelector(
         "#shanbay-example-sentence-btn",
@@ -413,44 +574,54 @@
 
       /** 添加单词和忘记单词的事件处理*/
       const addWordBtn = mainContainer.querySelector("#shanbay-add-word-btn");
-      if (data.exists === true) {
-        addWordBtn.addEventListener("click", function () {
-          chrome.runtime.sendMessage({
+      const sendAddOrForget = () => {
+        chrome.runtime.sendMessage(
+          {
             action: "addOrForget",
             word: data.content,
             wordID: data.id,
-          });
-        });
+          },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              debugLogger("warn", chrome.runtime.lastError.message);
+              return;
+            }
+            if (response) handleBackgroundMessage(response);
+          }
+        );
+      };
+      if (data.exists === true) {
+        addWordBtn.addEventListener("click", sendAddOrForget);
       } else if (data.exists === false) {
         if (storage.addBook) {
           addWordBtn.className = "hide";
-          chrome.runtime.sendMessage({
-            action: "addOrForget",
-            word: data.content,
-            wordID: data.id,
-          });
+          sendAddOrForget();
         } else {
-          addWordBtn.addEventListener("click", function () {
-            chrome.runtime.sendMessage({
-              action: "addOrForget",
-              word: data.content,
-              wordID: data.id,
-            });
-          });
+          addWordBtn.addEventListener("click", sendAddOrForget);
         }
       }
 
       if (storage.exampleSentence) {
         exampleSentenceSpan.classList.remove("hide");
         exampleSentenceBtn.addEventListener("click", () => {
-          chrome.runtime.sendMessage({ action: "getWordExample", id: data.id });
+          chrome.runtime.sendMessage(
+            { action: "getWordExample", id: data.id },
+            (response) => {
+              if (chrome.runtime.lastError) {
+                debugLogger("warn", chrome.runtime.lastError.message);
+                return;
+              }
+              if (response) handleBackgroundMessage(response);
+            }
+          );
         });
       }
     }
   };
 
-  /** 与 background 交互，返回信息的处理 */
-  chrome.runtime.onMessage.addListener(function (res) {
+  /** Handle background → content payloads (callback and/or onMessage) */
+  const handleBackgroundMessage = (res) => {
+    if (!res || !res.action) return;
     const addWordSpan = document.querySelector("#shanbay-add-word-span");
     const exampleSentenceDiv = document.querySelector(
       "#shanbay-example-sentence-div",
@@ -460,16 +631,29 @@
     );
     switch (res.action) {
       case "lookup":
+        // Clear loading / show result (Safari delivers final result here)
+        if (lookupLoadingTimer) {
+          clearTimeout(lookupLoadingTimer);
+          lookupLoadingTimer = null;
+        }
         popover({ loading: false, data: res.data });
         break;
+      case "lookupPending":
+        break;
+      case "playSound":
+        playAudio(res.url);
+        break;
       case "addOrForget":
-        if (res.data.errors === "SUCCESS") {
-          addWordSpan.innerHTML = "添加失败";
-        } else {
-          addWordSpan.innerHTML = "添加成功";
+        if (addWordSpan) {
+          if (res.data && res.data.errors === "SUCCESS") {
+            addWordSpan.innerHTML = "添加失败";
+          } else {
+            addWordSpan.innerHTML = "添加成功";
+          }
         }
         break;
       case "getWordExample":
+        if (!exampleSentenceDiv || !Array.isArray(res.data)) break;
         exampleSentenceDiv.innerHTML = res.data
           .map(
             (item, index) =>
@@ -477,20 +661,26 @@
           )
           .join("");
         exampleSentenceDiv.className = "simple-definition";
-        exampleSentenceSpan.innerHTML = "";
+        if (exampleSentenceSpan) exampleSentenceSpan.innerHTML = "";
         Array.from(exampleSentenceDiv.querySelectorAll(".speaker")).forEach(
           (dom) => {
-            dom.addEventListener("click", function () {
-              chrome.runtime.sendMessage({
-                action: "playSound",
-                url: this.dataset.target,
-              });
+            dom.addEventListener("click", function (e) {
+              e.preventDefault();
+              e.stopPropagation();
+              playAudio(
+                this.getAttribute("data-target") || this.dataset.target
+              );
             });
           },
         );
         calculatePopoverPosition();
         break;
     }
+  };
+
+  /** 与 background 交互，返回信息的处理 (also used by context menu path) */
+  chrome.runtime.onMessage.addListener(function (res) {
+    handleBackgroundMessage(res);
   });
   /**
    * 隐藏弹出框
@@ -499,9 +689,10 @@
    * */
   const hidePopover = (delay) => {
     setTimeout(function () {
-      selectionParentBody.removeChild(
-        document.querySelector("#__shanbay-popover"),
-      );
+      const el = document.querySelector("#__shanbay-popover");
+      if (el && el.parentNode) {
+        el.parentNode.removeChild(el);
+      }
       selectionParentBody = null;
     }, delay || 0);
   };
@@ -511,9 +702,7 @@
     event.type === "load" ||
     document.readyState === "complete"
   ) {
-    // document.addEventListener('DOMContentLoaded', function () {
-    // console.log('Shanbay Extension DOMContentLoaded......')
-    // if (chrome.tab)
+    debugLogger("info", "content script ready, dblclick enabled");
     document.addEventListener("dblclick", pendingSearchSelection);
     document.addEventListener("click", function (e) {
       /** 屏蔽弹出框的双击事件*/
@@ -526,4 +715,4 @@
     });
     // })
   }
-})();
+

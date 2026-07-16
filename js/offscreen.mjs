@@ -9,7 +9,7 @@ chrome.runtime.onMessage.addListener(function (message) {
         break
     
       default:
-        console.log('warn', `Unexpected message action received: '${message.action}'.`);
+        console.warn(`Unexpected message action received: '${message.action}'.`);
     }
   }
 });

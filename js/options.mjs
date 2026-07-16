@@ -1,4 +1,11 @@
-import {debugLogger, defaultIgnoreSites, storageSettingArray} from './const.mjs'
+import {
+  debugLogger,
+  defaultIgnoreSites,
+  storageSettingArray,
+  getExtensionSettings,
+  setExtensionSettings,
+  SETTINGS_KEY,
+} from './const.mjs'
 
 const renderDefaultIgnoreSites = () => {
   document.querySelector('.ignore-sites').innerHTML = defaultIgnoreSites.map(site => `<li>${site}</li>`).join('')
@@ -96,8 +103,9 @@ const getOptions = () => {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
-  chrome.storage.sync.get('__shanbayExtensionSettings', ({__shanbayExtensionSettings: settings}) => {
-    debugLogger('log', '__shanbayExtensionSettings: ', settings)
+  getExtensionSettings((result) => {
+    const settings = result[SETTINGS_KEY]
+    debugLogger('log', `${SETTINGS_KEY}: `, settings)
     if (settings && Object.keys(settings).length) {
       renderOptions(settings)
     } else {
@@ -110,9 +118,9 @@ document.addEventListener('DOMContentLoaded', function () {
     try {
       const _settings = getOptions()
       this.disabled = true
-      chrome.storage.sync.set({__shanbayExtensionSettings: _settings}, () => {
-        console.log('lastError in options js: ', chrome.runtime.lastError)
-        if (!chrome.runtime.lastError) {
+      setExtensionSettings(_settings, (lastError) => {
+        debugLogger('log', 'lastError in options js: ', lastError)
+        if (!lastError) {
           const saveRes = document.querySelector('#saveRes')
           saveRes.className = ''
           setTimeout( () => {
@@ -120,7 +128,7 @@ document.addEventListener('DOMContentLoaded', function () {
             this.disabled = false
           }, 1000)
         }
-        debugLogger('log', '__shanbayExtensionSettings settled.')
+        debugLogger('log', `${SETTINGS_KEY} settled.`)
       })
     } catch (e) {
 

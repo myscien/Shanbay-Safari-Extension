@@ -24,8 +24,15 @@
 }
 
 #__shanbay-popover.invisible {
-    width: 0;
+    /* Keep layout measurable; only hide visually so positioning works */
     opacity: 0;
+    pointer-events: none;
+}
+
+#__shanbay-popover:not(.invisible) {
+    width: 280px;
+    opacity: 1;
+    pointer-events: auto;
 }
 
 #__shanbay-popover.visible {

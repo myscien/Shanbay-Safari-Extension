@@ -272,6 +272,192 @@ export const debugLogger = (level, ...msg) => {
   if (devMode) console[level](...msg);
 };
 
+/** Settings storage key shared across background / content / options */
+export const SETTINGS_KEY = "__shanbayExtensionSettings";
+
+/**
+ * Prefer storage.sync (Chrome), fall back to storage.local (Safari / restricted environments).
+ * @returns {chrome.storage.StorageArea}
+ */
+export const getSettingsStorageArea = () => {
+  try {
+    if (chrome.storage && chrome.storage.sync) return chrome.storage.sync;
+  } catch (_) {
+    /* ignore */
+  }
+  return chrome.storage.local;
+};
+
+/**
+ * Read extension settings from sync, then local if empty/unavailable.
+ * @param {(result: object) => void} callback
+ */
+export const getExtensionSettings = (callback) => {
+  const finish = (result) => callback(result || {});
+  const localGet = () => {
+    chrome.storage.local.get(SETTINGS_KEY, (localResult) => {
+      finish(localResult || {});
+    });
+  };
+  try {
+    if (!chrome.storage.sync) {
+      localGet();
+      return;
+    }
+    chrome.storage.sync.get(SETTINGS_KEY, (result) => {
+      if (chrome.runtime.lastError) {
+        debugLogger("warn", "storage.sync.get failed, use local", chrome.runtime.lastError);
+        localGet();
+        return;
+      }
+      if (result && Object.keys(result).length) {
+        finish(result);
+      } else {
+        localGet();
+      }
+    });
+  } catch (e) {
+    debugLogger("warn", "getExtensionSettings error", e);
+    localGet();
+  }
+};
+
+/**
+ * Persist settings to local always, and sync when available (Chrome).
+ * @param {Array|object} settings
+ * @param {(error?: chrome.runtime.LastError) => void} [callback]
+ */
+export const setExtensionSettings = (settings, callback) => {
+  const data = { [SETTINGS_KEY]: settings };
+  chrome.storage.local.set(data, () => {
+    const localError = chrome.runtime.lastError;
+    if (chrome.storage.sync) {
+      chrome.storage.sync.set(data, () => {
+        if (typeof callback === "function") {
+          callback(chrome.runtime.lastError || localError);
+        }
+      });
+    } else if (typeof callback === "function") {
+      callback(localError);
+    }
+  });
+};
+
+/** Reuse one Audio element to avoid Safari autoplay / instance issues */
+let sharedAudio = null;
+/** Resume under user gesture so later plays are allowed (Safari) */
+let sharedAudioCtx = null;
+
+const unlockAudioForSafari = () => {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) {
+      if (!sharedAudioCtx) sharedAudioCtx = new AC();
+      if (sharedAudioCtx.state === "suspended") {
+        sharedAudioCtx.resume().catch((e) =>
+          debugLogger("warn", "AudioContext.resume failed", e)
+        );
+      }
+    }
+  } catch (e) {
+    debugLogger("warn", "unlockAudioForSafari failed", e);
+  }
+  if (!sharedAudio) {
+    sharedAudio = new Audio();
+    sharedAudio.preload = "auto";
+    sharedAudio.addEventListener("error", () => {
+      debugLogger("error", "Audio element error", sharedAudio.error);
+    });
+  }
+};
+
+const playFromSrc = (src) => {
+  unlockAudioForSafari();
+  try {
+    sharedAudio.pause();
+  } catch (_) {
+    /* ignore */
+  }
+  sharedAudio.src = src;
+  sharedAudio.volume = 1;
+  let p;
+  try {
+    p = sharedAudio.play();
+  } catch (err) {
+    return Promise.reject(err);
+  }
+  if (p && typeof p.catch === "function") {
+    return p.catch((err) => {
+      debugLogger("warn", "playFromSrc rejected", err && err.name, err);
+      throw err;
+    });
+  }
+  return Promise.resolve();
+};
+
+/**
+ * Decode data URL and play via Web Audio (Safari-friendly after unlock).
+ * @param {string} dataUrl
+ */
+const playWithWebAudio = async (dataUrl) => {
+  unlockAudioForSafari();
+  if (!sharedAudioCtx) throw new Error("no AudioContext");
+  const res = await fetch(dataUrl);
+  const buf = await res.arrayBuffer();
+  const decoded = await sharedAudioCtx.decodeAudioData(buf.slice(0));
+  const source = sharedAudioCtx.createBufferSource();
+  source.buffer = decoded;
+  source.connect(sharedAudioCtx.destination);
+  source.start(0);
+};
+
+/**
+ * Play remote pronunciation audio.
+ * Safari often blocks cross-origin Audio(url) (CORS / media CDN). Fall back to
+ * fetching bytes in the extension background and playing a blob/data URL.
+ * Must call from a click handler so we can unlock audio under user gesture.
+ * @param {string} url
+ */
+export const playAudio = (url) => {
+  if (!url) return;
+
+  // Critical for Safari: unlock audio graph synchronously inside the click
+  unlockAudioForSafari();
+
+  const tryDirect = () => playFromSrc(url);
+
+  const tryViaBackground = () =>
+    new Promise((resolve, reject) => {
+      try {
+        chrome.runtime.sendMessage({ action: "fetchAudio", url }, (res) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          if (!res || !res.dataUrl) {
+            reject(new Error((res && res.error) || "no audio data"));
+            return;
+          }
+          playFromSrc(res.dataUrl)
+            .then(resolve)
+            .catch(() =>
+              playWithWebAudio(res.dataUrl).then(resolve).catch(reject)
+            );
+        });
+      } catch (e) {
+        reject(e);
+      }
+    });
+
+  tryDirect().catch((e) => {
+    debugLogger("warn", "direct remote play failed", e);
+  });
+
+  tryViaBackground().catch((err2) => {
+    debugLogger("error", "playAudio failed", err2);
+  });
+};
+
 /**
  * chrome 通知处理方法, 传入的参数就是chrome notifications的参数
  * @function notify
@@ -281,6 +467,11 @@ export const debugLogger = (level, ...msg) => {
  * @param {string} [opt.url=https://www.shanbay.com/] - notifications url, notifications可以点击跳转
  * */
 export const notify = (opt = {title: '人丑多读书', message: '少壮不努力，老大背单词', url: 'https://www.shanbay.com/'}) => {
+  // chrome.notifications is not available in Safari Web Extensions
+  if (!chrome.notifications || !chrome.notifications.create) {
+    debugLogger("warn", "notifications API unavailable; badge-only reminder", opt.message);
+    return;
+  }
   const options = {
     type: "basic",
     title: opt.title,
@@ -301,6 +492,276 @@ export const notify = (opt = {title: '人丑多读书', message: '少壮不努�
 };
 
 /**
+ * Collect all Shanbay-related cookies the extension can see.
+ * Safari often stores them under web.shanbay.com host-only, so apiv3 fetch
+ * with credentials:include does not attach them automatically.
+ * @returns {Promise<chrome.cookies.Cookie[]>}
+ */
+export const getShanbayCookies = async () => {
+  if (!chrome.cookies || !chrome.cookies.getAll) return [];
+
+  const queries = [
+    { domain: "shanbay.com" },
+    { domain: ".shanbay.com" },
+    { url: "https://web.shanbay.com/" },
+    { url: "https://www.shanbay.com/" },
+    { url: "https://apiv3.shanbay.com/" },
+    { name: "auth_token" },
+  ];
+
+  const byKey = new Map();
+  for (const q of queries) {
+    const list = await new Promise((resolve) => {
+      try {
+        chrome.cookies.getAll(q, (cookies) => {
+          if (chrome.runtime.lastError) {
+            resolve([]);
+            return;
+          }
+          resolve(cookies || []);
+        });
+      } catch (_) {
+        resolve([]);
+      }
+    });
+    for (const c of list) {
+      if (!c || !c.name) continue;
+      byKey.set(`${c.domain}|${c.name}|${c.path}`, c);
+    }
+  }
+  return Array.from(byKey.values());
+};
+
+/**
+ * Best-effort: copy auth cookies onto apiv3 so credentials:include can send them (Safari).
+ */
+const ensureApiv3AuthCookies = async (cookies) => {
+  if (!chrome.cookies || !chrome.cookies.set) return;
+  const auth = cookies.find((c) => c.name === "auth_token") || cookies[0];
+  if (!auth || !auth.value) return;
+
+  const targets = [
+    "https://apiv3.shanbay.com/",
+    "https://web.shanbay.com/",
+    "https://www.shanbay.com/",
+  ];
+
+  await Promise.all(
+    targets.map(
+      (url) =>
+        new Promise((resolve) => {
+          try {
+            chrome.cookies.set(
+              {
+                url,
+                name: "auth_token",
+                value: auth.value,
+                path: "/",
+                secure: true,
+                // Do not set domain host-only so it applies to this host
+                expirationDate:
+                  auth.expirationDate || Math.floor(Date.now() / 1000) + 86400 * 30,
+              },
+              () => resolve()
+            );
+          } catch (_) {
+            resolve();
+          }
+        })
+    )
+  );
+};
+
+/** Race a promise against a timeout rejection. */
+export const withTimeout = (promise, ms, message) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject({ status: 504, msg: message || `超时 (${ms}ms)` }), ms);
+    }),
+  ]);
+
+/**
+ * Wait until a tab finishes loading (or timeout).
+ * @param {number} tabId
+ * @param {number} [timeoutMs]
+ */
+const waitTabComplete = (tabId, timeoutMs = 6000) =>
+  new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      try {
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+      } catch (_) {
+        /* ignore */
+      }
+      resolve();
+    };
+    const onUpdated = (id, info) => {
+      if (id === tabId && info.status === "complete") finish();
+    };
+    try {
+      chrome.tabs.onUpdated.addListener(onUpdated);
+    } catch (_) {
+      finish();
+      return;
+    }
+    try {
+      chrome.tabs.get(tabId, (tab) => {
+        if (tab && tab.status === "complete") finish();
+      });
+    } catch (_) {
+      /* ignore */
+    }
+    setTimeout(finish, timeoutMs);
+  });
+
+/**
+ * Find an existing Shanbay tab, or open one (short wait).
+ * @returns {Promise<{ tabId: number, created: boolean }>}
+ */
+const getOrOpenShanbayTab = async () => {
+  const existing = await new Promise((resolve) => {
+    try {
+      chrome.tabs.query(
+        { url: ["*://*.shanbay.com/*", "*://shanbay.com/*"] },
+        (tabs) => resolve(tabs || [])
+      );
+    } catch (_) {
+      resolve([]);
+    }
+  });
+  if (existing.length) {
+    return { tabId: existing[0].id, created: false };
+  }
+  const tab = await new Promise((resolve, reject) => {
+    try {
+      chrome.tabs.create(
+        { url: "https://web.shanbay.com/wordsweb/", active: false },
+        (t) => {
+          if (chrome.runtime.lastError || !t) {
+            reject(
+              new Error(
+                chrome.runtime.lastError?.message || "无法打开扇贝页面"
+              )
+            );
+            return;
+          }
+          resolve(t);
+        }
+      );
+    } catch (e) {
+      reject(e);
+    }
+  });
+  await waitTabComplete(tab.id, 6000);
+  await new Promise((r) => setTimeout(r, 800));
+  return { tabId: tab.id, created: true };
+};
+
+/**
+ * Run a request inside a Shanbay tab.
+ * Uses synchronous XHR so Safari executeScript does not hang on async fetch.
+ * @returns {Promise<{ ok: boolean, status: number, data: any }>}
+ */
+const fetchInShanbayPage = async (url, options = {}) => {
+  if (!chrome.scripting || !chrome.scripting.executeScript) {
+    throw new Error("scripting API unavailable");
+  }
+  const { tabId } = await getOrOpenShanbayTab();
+  const method = options.method || "GET";
+  const body = options.body || null;
+  const headerObj = {};
+  if (options.headers) {
+    if (options.headers instanceof Headers) {
+      options.headers.forEach((v, k) => {
+        headerObj[k] = v;
+      });
+    } else {
+      Object.assign(headerObj, options.headers);
+    }
+  }
+
+  // SYNC function — Safari often does not await async results from executeScript
+  const injectFn = (fetchUrl, fetchMethod, fetchBody, fetchHeaders) => {
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open(fetchMethod || "GET", fetchUrl, false);
+      xhr.withCredentials = true;
+      if (fetchHeaders) {
+        Object.keys(fetchHeaders).forEach((k) => {
+          try {
+            xhr.setRequestHeader(k, fetchHeaders[k]);
+          } catch (_) {
+            /* ignore forbidden headers */
+          }
+        });
+      }
+      xhr.send(fetchBody || null);
+      let data = null;
+      try {
+        data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch (_) {
+        data = { msg: xhr.responseText || "" };
+      }
+      return {
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        data,
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        status: 0,
+        data: { msg: e && e.message ? e.message : String(e) },
+      };
+    }
+  };
+
+  const runInject = (useMainWorld) =>
+    chrome.scripting.executeScript({
+      target: { tabId },
+      ...(useMainWorld ? { world: "MAIN" } : {}),
+      func: injectFn,
+      args: [url, method, body, headerObj],
+    });
+
+  let results;
+  try {
+    results = await withTimeout(
+      runInject(true),
+      8000,
+      "扇贝页面请求超时"
+    );
+  } catch (mainWorldErr) {
+    debugLogger("warn", "MAIN world inject failed, try isolated", mainWorldErr);
+    results = await withTimeout(
+      runInject(false),
+      8000,
+      "扇贝页面请求超时"
+    );
+  }
+
+  const result = results && results[0] && results[0].result;
+  if (!result) {
+    throw new Error("扇贝页面执行脚本无返回（请打开 web.shanbay.com 并登录）");
+  }
+  return result;
+};
+
+const isAuthErrorBody = (status, body) => {
+  const msg = (body && (body.msg || body.message)) || "";
+  return (
+    status === 401 ||
+    status === 403 ||
+    (status === 404 && /登录|login|过期|auth/i.test(msg)) ||
+    /登录信息过期|未登录|请登录/i.test(msg)
+  );
+};
+
+/**
  * 基于fetch的网络请求方法的封装，只有两种数据的返回，buffer和json，因为这个应用里面只用到了这两种
  * @function request
  * @see [use fetch API]{@link https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch}
@@ -309,20 +770,140 @@ export const notify = (opt = {title: '人丑多读书', message: '少壮不努�
  * @param {string} [options.type='buffer'] - whether need return buffer
  * @return Promise
  * */
-export const request = (url, options = {}) => {
-  return fetch(url, Object.assign(options, { credentials: "include", mode: 'cors' }))
-    .then((res) => {
-      if (res.ok) {
-        if (options.type === "buffer") return res.arrayBuffer();
-        return res.json();
-      } else {
-        const promise = res.json ? res.json() : res.text();
-        return promise.then((r) =>
-          Promise.reject({ status: res.status, ...r })
+export const request = async (url, options = {}) => {
+  const { type, headers: inputHeaders, ...rest } = options;
+  const headers = new Headers(inputHeaders || {});
+  const isShanbayApi =
+    typeof url === "string" && url.includes("shanbay.com");
+
+  // --- Path A: direct extension fetch (works on Chrome) ---
+  let cookies = [];
+  try {
+    if (isShanbayApi) {
+      cookies = await getShanbayCookies();
+      if (cookies.length) {
+        await ensureApiv3AuthCookies(cookies);
+        const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+        if (cookieHeader && !headers.has("Cookie")) {
+          try {
+            headers.set("Cookie", cookieHeader);
+          } catch (_) {
+            /* forbidden */
+          }
+        }
+        const auth = cookies.find((c) => c.name === "auth_token");
+        if (auth && auth.value && !headers.has("Authorization")) {
+          headers.set("Authorization", auth.value);
+        }
+        debugLogger(
+          "info",
+          "request with cookies",
+          cookies.map((c) => `${c.name}@${c.domain}`),
+          url
         );
+      } else {
+        debugLogger("warn", "no shanbay cookies for direct fetch", url);
       }
     }
-  );
+  } catch (e) {
+    debugLogger("warn", "cookie attach failed", e);
+  }
+
+  // Audio buffers: always direct fetch (no JSON auth path needed as much)
+  if (type === "buffer") {
+    const res = await fetch(url, {
+      ...rest,
+      headers,
+      credentials: "include",
+      mode: "cors",
+    });
+    if (res.ok) return res.arrayBuffer();
+    return Promise.reject({ status: res.status, msg: "音频加载失败" });
+  }
+
+  let directBody = null;
+  let directStatus = 0;
+  let directOk = false;
+  try {
+    const res = await fetch(url, {
+      ...rest,
+      headers,
+      credentials: "include",
+      mode: "cors",
+    });
+    directStatus = res.status;
+    directOk = res.ok;
+    try {
+      directBody = await res.json();
+    } catch (_) {
+      directBody = { msg: res.statusText || "请求失败" };
+    }
+    if (directOk) return directBody;
+  } catch (e) {
+    debugLogger("warn", "direct fetch failed", e);
+    directBody = { msg: e && e.message ? e.message : "请求失败" };
+  }
+
+  // --- Path B (Safari): fetch inside a real Shanbay tab page context ---
+  if (isShanbayApi && (!directOk || isAuthErrorBody(directStatus, directBody))) {
+    debugLogger("info", "falling back to Shanbay-tab page fetch", url);
+    try {
+      const pageHeaders = {};
+      if (
+        rest.method === "POST" ||
+        (options.method || "").toUpperCase() === "POST"
+      ) {
+        pageHeaders["Content-Type"] =
+          headers.get("Content-Type") || "application/json";
+      }
+      const pageResult = await withTimeout(
+        fetchInShanbayPage(url, {
+          method: options.method || rest.method || "GET",
+          body: options.body || rest.body || null,
+          headers: pageHeaders,
+        }),
+        12000,
+        "查询超时：请打开 web.shanbay.com 并登录后重试"
+      );
+      if (pageResult.ok) {
+        return pageResult.data;
+      }
+      const msg =
+        (pageResult.data && (pageResult.data.msg || pageResult.data.message)) ||
+        "登录信息过期";
+      const status = isAuthErrorBody(pageResult.status, pageResult.data)
+        ? 401
+        : pageResult.status || 401;
+      return Promise.reject({
+        status,
+        ...(pageResult.data || {}),
+        msg:
+          status === 401
+            ? "登录信息过期：请在 Safari 打开 web.shanbay.com 并重新登录，保持该标签页打开后再查词"
+            : msg,
+      });
+    } catch (e) {
+      debugLogger("error", "page fetch failed", e);
+      const msg =
+        (e && e.msg) ||
+        (e && e.message) ||
+        String(e) ||
+        "无法使用扇贝登录态";
+      return Promise.reject({
+        status: (e && e.status) || 401,
+        msg:
+          /超时|timeout/i.test(msg)
+            ? msg
+            : "无法使用扇贝登录态：请打开 https://web.shanbay.com 并登录，保持标签页打开后重试。详情: " +
+              msg,
+      });
+    }
+  }
+
+  const msg = (directBody && (directBody.msg || directBody.message)) || "请求失败";
+  const status =
+    isAuthErrorBody(directStatus, directBody) ? 401 : directStatus || 500;
+  return Promise.reject({ status, ...(directBody || {}), msg });
 };
 
 /**
@@ -401,6 +982,79 @@ export let storageSettingMap = {};
 storageSettingArray.forEach((item) => {
   Object.assign(storageSettingMap, item);
 });
+
+/**
+ * Promise wrapper for chrome.cookies callbacks (Safari is picky about cookie access).
+ * @param {(cb: Function) => void} fn
+ * @returns {Promise<any>}
+ */
+const cookiesCall = (fn) =>
+  new Promise((resolve) => {
+    try {
+      fn((result) => {
+        if (chrome.runtime.lastError) {
+          debugLogger("warn", "cookies API error", chrome.runtime.lastError.message);
+          resolve(null);
+          return;
+        }
+        resolve(result);
+      });
+    } catch (e) {
+      debugLogger("warn", "cookies API threw", e);
+      resolve(null);
+    }
+  });
+
+/**
+ * Read Shanbay login token / session for popup UI.
+ * Safari often fails the simple Chrome cookie query, so try several strategies
+ * and fall back to an authenticated API probe.
+ * @returns {Promise<string>} non-empty if logged in
+ */
+export const getAuthToken = async () => {
+  // Prefer real auth_token cookie (needed for API)
+  const all = await getShanbayCookies();
+  if (all.length) {
+    debugLogger(
+      "info",
+      "shanbay cookies found",
+      all.map((c) => `${c.name}@${c.domain}`)
+    );
+    const auth = all.find((c) => c.name === "auth_token");
+    if (auth && auth.value) {
+      await ensureApiv3AuthCookies(all);
+      return auth.value;
+    }
+    const likely = all.find((c) =>
+      /auth|token|session|jwt|sid/i.test(c.name || "")
+    );
+    if (likely && likely.value) {
+      await ensureApiv3AuthCookies(all);
+      return likely.value;
+    }
+  }
+
+  // Cookie stores (Safari can use non-default stores)
+  if (chrome.cookies && chrome.cookies.getAllCookieStores) {
+    const stores = await cookiesCall((cb) => chrome.cookies.getAllCookieStores(cb));
+    if (Array.isArray(stores)) {
+      for (const store of stores) {
+        const cookies = await cookiesCall((cb) =>
+          chrome.cookies.getAll(
+            { storeId: store.id, domain: "shanbay.com", name: "auth_token" },
+            cb
+          )
+        );
+        if (cookies && cookies[0] && cookies[0].value) {
+          return cookies[0].value;
+        }
+      }
+    }
+  }
+
+  // Last resort: do not treat unauthenticated API errors as logged-in
+  return "";
+};
 
 /**
  * @description 查询单词

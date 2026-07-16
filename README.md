@@ -1,9 +1,40 @@
 # chrome-shanbay-v2
 
-> shanbay chrome 网页查单词插件
+> shanbay 网页查单词浏览器扩展（Chrome / Edge / Safari）
 
 Chrome 商店地址：https://chrome.google.com/webstore/detail/%E6%89%87%E8%B4%9D%E5%8A%A9%E6%89%8Bv2/pkibohmmnmpgbnaoappgndlfncanookc
 
+当前版本：**2.3.0**（Safari 兼容与稳定性改进）
+
+## 安装
+
+### Chrome / Edge
+
+1. 打开 `chrome://extensions`（Edge: `edge://extensions`）
+2. 开启 **开发者模式**
+3. **加载已解压的扩展程序** → 选择本仓库目录
+
+### Safari（macOS，长期使用）
+
+临时扩展（Developer → Add Temporary Extension）在退出 Safari 后会消失。日常使用请用 Xcode 签名安装：
+
+```bash
+./scripts/install-safari-permanent.sh
+# 或先 ./scripts/convert-to-safari.sh ，再按 SAFARI.md 配置 Team 并 ⌘R
+```
+
+详见 **[SAFARI.md](./SAFARI.md)**。
+
+- 个人本机使用：免费 Apple ID 即可  
+- 上架 App Store：需加入 Apple Developer Program（约 $99/年）  
+- 请在 **Safari** 内登录 [web.shanbay.com](https://web.shanbay.com)，查词时保持扇贝标签页可用更稳妥  
+
+修改 JS/CSS 后同步到 Safari 工程：
+
+```bash
+./scripts/prepare-safari-resources.sh
+# 然后在 Xcode 中再次 Run
+```
 
 ## 提供的功能
 - 单词双击选中自动弹出释义
@@ -26,6 +57,7 @@ Chrome 商店地址：https://chrome.google.com/webstore/detail/%E6%89%87%E8%B4%
 
 
 ## 更新记录：
+- 2026.7 v2.3.0 Safari Web Extension 兼容：跨浏览器消息与发音、登录会话回退、存储 local 回退；清理调试日志；安装文档与脚本
 - 2018年之前，使用的是扇贝开放API。~~虽然没有官方自己用的库全，API更好用~~
 - 2020.10 扇贝关闭了原来的2.0API，使用了新的3.0API，插件改成直接调官方未开放的API。
 - 2021.6 扇贝修改查不到单词的API，导致未找到单词没有正确渲染结果，修改了一点样式。

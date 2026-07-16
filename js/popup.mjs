@@ -11,11 +11,10 @@ function renderUser () {
     })
   }
 
-  chrome.runtime.sendMessage({
-    action: 'getAuthInfo'
-  }, auth => {
-    console.log('popup get background auth info', auth)
-    if (auth && auth.length) {
+  const applyAuthUI = (auth) => {
+    debugLogger('log', 'popup auth', auth ? '(present)' : '(empty)')
+    const loggedIn = !!(auth && String(auth).length)
+    if (loggedIn) {
       login.className = 'hide'
       batchAddBtn.className = ''
       learnBtn.className = ''
@@ -26,7 +25,23 @@ function renderUser () {
       learnBtn.className = 'hide'
       settingBtn.className = 'hide'
     }
+  }
+
+  // Safari can be slow / flaky reading cookies — check twice.
+  chrome.runtime.sendMessage({ action: 'getAuthInfo' }, (auth) => {
+    if (chrome.runtime.lastError) {
+      debugLogger('warn', 'getAuthInfo error', chrome.runtime.lastError.message)
+      applyAuthUI('')
+      return
+    }
+    applyAuthUI(auth)
   })
+
+  setTimeout(() => {
+    chrome.runtime.sendMessage({ action: 'getAuthInfo' }, (auth) => {
+      if (!chrome.runtime.lastError) applyAuthUI(auth)
+    })
+  }, 800)
 
 }
 
@@ -39,6 +54,6 @@ document.addEventListener('DOMContentLoaded', function () {
     chrome.tabs.create({ url: 'https://web.shanbay.com/wordsweb/#/collection' })
   }
   document.querySelector('#options').onclick = function () {
-    chrome.tabs.create({ url: 'options.html' })
+    chrome.tabs.create({ url: chrome.runtime.getURL('options.html') })
   }
 })
