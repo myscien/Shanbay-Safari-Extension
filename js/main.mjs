@@ -7,6 +7,23 @@ import {
   SETTINGS_KEY,
 } from './const.mjs';
 
+// Bump this string whenever content-script behavior changes — check DevTools console.
+export const CONTENT_BUILD = "2026-07-16-vocab-bold-v5";
+try {
+  const manifestVersion =
+    typeof chrome !== "undefined" &&
+    chrome.runtime &&
+    typeof chrome.runtime.getManifest === "function"
+      ? chrome.runtime.getManifest().version
+      : "?";
+  console.info(
+    `%c[扇贝助手] content loaded  build=${CONTENT_BUILD}  manifest=${manifestVersion}`,
+    "color:#28bea0;font-weight:bold;",
+  );
+} catch (_) {
+  /* ignore */
+}
+
 // Content script entry (ES module). Safari gets an IIFE bundle of this file.
 // Default settings immediately so double-click works before storage returns.
 const storage = Object.assign({}, storageSettingMap);
@@ -20,7 +37,41 @@ const storage = Object.assign({}, storageSettingMap);
   // @param {DOM(range) | null}
   let selectionRange = null;
 
-  const popoverWidth = 280;
+  // Slightly wider = fewer wrapped lines = less vertical scrolling
+  const popoverWidth = 320;
+
+  const escapeHtml = (s) =>
+    String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+  /**
+   * Shanbay API wraps headwords in &lt;vocab&gt;…&lt;/vocab&gt;.
+   * Convert to bold (safe HTML): escape all text, wrap vocab spans in &lt;b&gt;.
+   * Empty &lt;vocab&gt;&lt;/vocab&gt; is dropped.
+   * @param {unknown} s
+   * @returns {string} safe HTML fragment
+   */
+  const formatShanbayHtml = (s) => {
+    const t = String(s == null ? "" : s);
+    const re = /<vocab\b[^>]*>([\s\S]*?)<\/vocab>/gi;
+    let out = "";
+    let last = 0;
+    let m;
+    while ((m = re.exec(t)) !== null) {
+      out += escapeHtml(t.slice(last, m.index));
+      const inner = m[1];
+      if (inner) {
+        out += `<b class="shanbay-vocab">${escapeHtml(inner)}</b>`;
+      }
+      last = m.index + m[0].length;
+    }
+    out += escapeHtml(t.slice(last));
+    // Drop any leftover empty / unmatched vocab tags
+    return out.replace(/&lt;\/?vocab\b[^&]*&gt;/gi, "");
+  };
 
   /**
    * 从 chrome.storage 获取插件设置（sync 优先，Safari 等环境回退 local）
@@ -236,120 +287,171 @@ const storage = Object.assign({}, storageSettingMap);
    * returns {{popper: {top: number, left: number}, arrow: {top: string, left: number, bottom: string}} - 计算后的位置和最大高度
    */
   function calculatePopoverPosition() {
-    const arrwoWidth = 11
-    // 默认的垂直和水平间距
-    const SPACING = 4;
+    const arrowSize = 11;
+    const SPACING = 8;
+    const MIN_HEIGHT = 160;
+    // Long definitions: use almost the whole screen, not only the gap under the word
+    const VIEWPORT_HEIGHT_RATIO = 0.92;
 
+    const mainContainer = document.querySelector("#__shanbay-popover");
+    if (!mainContainer) return;
+    const inner = mainContainer.querySelector("#shanbay-inner");
+    const scrollEl = mainContainer.querySelector("#shanbay-scroll");
+    const arrowEl = mainContainer.querySelector("#shanbay-arrow");
 
-    // 1. 获取选中区域的边界矩形 (相对于视口)
-    const rect = getSelectionRect(selectionRange);
-    debugLogger("rect", rect);
+    // Fixed to the viewport so long content cannot run off-screen with the page
+    mainContainer.style.setProperty("position", "fixed", "important");
+    mainContainer.style.setProperty("z-index", "2147483646", "important");
+    mainContainer.style.setProperty("width", popoverWidth + "px", "important");
 
-    // 2. 获取视口的尺寸
+    // Measure true content height — uncapped (title + body + sticky footer)
+    if (inner) {
+      inner.style.setProperty("max-height", "none", "important");
+      inner.style.setProperty("overflow", "visible", "important");
+      inner.classList.remove("is-scrollable");
+    }
+    if (scrollEl) {
+      scrollEl.style.setProperty("max-height", "none", "important");
+      scrollEl.style.setProperty("overflow", "visible", "important");
+    }
+    mainContainer.style.setProperty("max-height", "none", "important");
+    mainContainer.style.removeProperty("height");
+
+    const naturalHeight = mainContainer.offsetHeight || 0;
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
 
-    const popper = { top: 0, left: 0 };
+    let rect;
+    try {
+      rect = selectionRange
+        ? getSelectionRect(selectionRange)
+        : { top: 80, bottom: 100, left: 80, right: 80, width: 0, height: 0 };
+    } catch (e) {
+      rect = { top: 80, bottom: 100, left: 80, right: 80, width: 0, height: 0 };
+    }
+    // Fallback if selection rect is empty/invalid
+    if (!rect || (rect.width === 0 && rect.height === 0 && rect.top === 0 && rect.bottom === 0)) {
+      rect = {
+        top: Math.min(120, viewportHeight / 4),
+        bottom: Math.min(140, viewportHeight / 4 + 20),
+        left: Math.max(SPACING, viewportWidth / 2 - 40),
+        right: Math.max(SPACING, viewportWidth / 2 + 40),
+        width: 80,
+        height: 20,
+      };
+    }
+
+    // Cap by nearly full viewport (not by space above/below the word only)
+    const maxViewport = Math.max(
+      MIN_HEIGHT,
+      Math.floor(viewportHeight * VIEWPORT_HEIGHT_RATIO),
+    );
+    const displayHeight = Math.min(naturalHeight, maxViewport);
+    const maxInnerHeight = Math.max(MIN_HEIGHT, displayHeight);
+    const needsScroll = naturalHeight > maxViewport + 1;
+
     const arrow = {
-      top: "-11px",
+      top: `-${arrowSize}px`,
       left: "50%",
       bottom: "unset",
       rotate: "0deg",
     };
 
-    // --- 垂直定位 (Y 轴) ---
+    // Prefer near the word; if tall, shift within the viewport so we can grow tall
+    const topIfBelow = rect.bottom + arrowSize;
+    const topIfAbove = rect.top - displayHeight - arrowSize;
+    let top;
+    let placeBelow = true;
 
-    // 选中区域下方空间
-    const spaceBelow = viewportHeight - rect.bottom - SPACING;
-    // 选中区域上方空间
-    const spaceAbove = rect.top - SPACING;
-    let maxHeight = Math.max(spaceBelow, spaceAbove); // 初始最大高度为理想高度
-    const mainContainer = document.querySelector("#__shanbay-popover");
-    const popoverHeight = mainContainer.offsetHeight;
-    mainContainer.style.maxHeight = maxHeight + "px";
+    if (topIfBelow + displayHeight <= viewportHeight - SPACING) {
+      // Fits entirely under the word
+      top = topIfBelow;
+      placeBelow = true;
+    } else if (topIfAbove >= SPACING) {
+      // Fits entirely above the word
+      top = topIfAbove;
+      placeBelow = false;
+    } else {
+      // Tall content: pin into the viewport (use full allowed height).
+      // Stay as close to the word as possible without going off-screen.
+      top = Math.min(topIfBelow, viewportHeight - SPACING - displayHeight);
+      top = Math.max(SPACING, top);
+      // Arrow points toward the selection
+      const popoverMid = top + displayHeight / 2;
+      const selMid = (rect.top + rect.bottom) / 2;
+      placeBelow = selMid <= popoverMid;
+    }
 
-    // 优先尝试向下渲染
-    if (spaceBelow >= popoverHeight) {
-      // ✅ 空间足够，向下显示
-      popper.top = rect.bottom + arrwoWidth;
-      maxHeight = popoverHeight;
-    } else if (spaceAbove >= popoverHeight) {
-      // ✅ 下方不足，但上方足够，向上显示
-      popper.top = rect.top - popoverHeight - arrwoWidth;
-      maxHeight = popoverHeight;
+    if (!placeBelow) {
       arrow.top = "unset";
-      arrow.left = `calc(50% - ${arrwoWidth}px)`;
+      arrow.bottom = `-${arrowSize}px`;
       arrow.rotate = "180deg";
-      arrow.bottom = `-${arrwoWidth}px`;
-    } else {
-      // ⚠️ 上下空间都不足，选择空间较大的一侧并设置 maxHeight 启用滚动
-
-      if (spaceBelow >= spaceAbove && spaceBelow > 0) {
-        // ⬇️ 下方空间较大 (或相等)，向下显示，并限制高度
-        popper.top = rect.bottom - arrwoWidth;
-        maxHeight = spaceBelow;
-        arrow.left = `calc(50% - ${arrwoWidth}px)`;
-      } else if (spaceAbove > 0) {
-        // ⬆️ 上方空间较大，向上显示，并限制高度
-        maxHeight = spaceAbove;
-        popper.top = rect.top - maxHeight;
-        arrow.top = "unset";
-        arrow.left = `calc(50% - ${arrwoWidth}px)`;
-        arrow.bottom = `-${arrwoWidth}px`;
-      } else {
-        // ❌ 极小概率事件：上方和下方空间都为 0 (或负数)，通常发生在屏幕极小或元素贴边时。
-        // 默认放在下方，并限制高度为 0 (实际上不会发生，只是为了逻辑完整)
-        popper.top = rect.bottom;
-        maxHeight = 0;
-      }
-
-      // 如果计算出的 maxHeight 小于一个合理的最小高度，可能需要强制设置一个值或给用户提示
-      maxHeight = Math.max(0, maxHeight);
+      arrow.left = `calc(50% - ${arrowSize}px)`;
     }
 
-    // --- 水平定位 (X 轴) ---
-
-    // 1. 尝试水平居中
-    let potentialLeft = rect.left + rect.width / 2 - popoverWidth / 2;
-
-    // 2. 检查是否超出左边缘 (规则 2)
-    if (potentialLeft < SPACING) {
-      // 靠近左边区域，左边空间不支持居中，左边缘对齐选中区域的左边缘
-      popper.left = rect.left;
-      // 确保不会超出左侧视口边界（例如，选中区域本身就在屏幕外）
-      popper.left = Math.max(SPACING, popper.left);
-      arrow.left = Math.min(rect.width / 2, 8) + "px";
-    }
-    // 3. 检查是否超出右边缘 (规则 3)
-    else if (potentialLeft + popoverWidth > viewportWidth) {
-      // 靠近右边区域，右边空间不支持居中，右边缘对齐选中区域的右边缘
-      popper.left = rect.right - popoverWidth;
-      // 确保不会超出右侧视口边界
-      popper.left = Math.min(viewportWidth - popoverWidth, popper.left);
-
-      // 计算箭头位置：让箭头指向选中区域的中心
+    // --- horizontal ---
+    let left = rect.left + rect.width / 2 - popoverWidth / 2;
+    if (left < SPACING) {
+      left = SPACING;
+      arrow.left = Math.min(Math.max(rect.left + rect.width / 2 - left, 12), popoverWidth - 24) + "px";
+    } else if (left + popoverWidth > viewportWidth - SPACING) {
+      left = Math.max(SPACING, viewportWidth - SPACING - popoverWidth);
       const selectionCenter = rect.left + rect.width / 2;
-      let arrowLeft = selectionCenter - popper.left - arrwoWidth;
-
-      // 限制箭头在 popover 内部，保留 6px 的圆角安全距离
-      arrowLeft = Math.max(6, Math.min(arrowLeft, popoverWidth - arrwoWidth * 2 - 6));
+      let arrowLeft = selectionCenter - left - arrowSize;
+      arrowLeft = Math.max(6, Math.min(arrowLeft, popoverWidth - arrowSize * 2 - 6));
       arrow.left = arrowLeft + "px";
-    } else {
-      // ✅ 居中安全，采用居中位置 (规则 1)
-      popper.left = potentialLeft;
     }
-    popper.top = popper.top + window.scrollY;
-    popper.left = popper.left + window.scrollX;
-    // return { popper, arrow };
 
-    mainContainer.style.top = popper.top + "px";
-    mainContainer.style.left = popper.left + "px";
+    // Shell (inner) is a flex column: title + scroll body + sticky footer.
+    // Only #shanbay-scroll scrolls so footer buttons stay visible.
+    if (inner) {
+      inner.style.setProperty("max-height", maxInnerHeight + "px", "important");
+      inner.style.setProperty("width", popoverWidth - 4 + "px", "important");
+      inner.style.setProperty("display", "flex", "important");
+      inner.style.setProperty("flex-direction", "column", "important");
+      inner.style.setProperty("overflow", "hidden", "important");
+      if (needsScroll) {
+        inner.classList.add("is-scrollable");
+      } else {
+        inner.classList.remove("is-scrollable");
+      }
+    }
+    if (scrollEl) {
+      scrollEl.style.setProperty("flex", "1 1 auto", "important");
+      scrollEl.style.setProperty("min-height", "0", "important");
+      scrollEl.style.setProperty("overflow-x", "hidden", "important");
+      scrollEl.style.setProperty("overflow-y", "auto", "important");
+      if (!scrollEl.__shanbayWheelBound) {
+        scrollEl.__shanbayWheelBound = true;
+        scrollEl.addEventListener(
+          "wheel",
+          (e) => {
+            const el = e.currentTarget;
+            if (el.scrollHeight > el.clientHeight + 1) {
+              e.stopPropagation();
+            }
+          },
+          { passive: true },
+        );
+      }
+    }
+
+    mainContainer.style.setProperty("top", top + "px", "important");
+    mainContainer.style.setProperty("left", left + "px", "important");
+    mainContainer.style.setProperty("right", "auto", "important");
+    mainContainer.style.setProperty("bottom", "auto", "important");
     mainContainer.classList.remove("invisible");
-    const arrowElement = mainContainer.querySelector("#shanbay-arrow");
-    arrowElement.style.left = arrow.left;
-    arrowElement.style.top = arrow.top;
-    arrowElement.style.bottom = arrow.bottom;
-    arrowElement.style.rotate = arrow.rotate;
+
+    if (arrowEl) {
+      arrowEl.style.left = arrow.left;
+      arrowEl.style.top = arrow.top;
+      arrowEl.style.bottom = arrow.bottom;
+      arrowEl.style.rotate = arrow.rotate;
+    }
+
+    console.info(
+      `[扇贝助手] popover layout  build=${CONTENT_BUILD}  natural=${naturalHeight}px  max=${maxInnerHeight}px  scroll=${needsScroll}  viewportRatio=${VIEWPORT_HEIGHT_RATIO}`,
+    );
   }
 
   /**
@@ -377,15 +479,21 @@ const storage = Object.assign({}, storageSettingMap);
     if (!selectionParentBody) {
       selectionParentBody = document.body;
     }
-    if (!selectionParentBody) {
+    // Always mount on document.body so position:fixed is viewport-relative
+    // (a transformed ancestor would otherwise break fixed positioning).
+    const mountRoot = document.body || selectionParentBody;
+    if (!mountRoot) {
       debugLogger("warn", "no document.body to attach popover");
       return;
     }
-    if (!document.querySelector("#__shanbay-popover")) {
-      selectionParentBody.insertAdjacentHTML("beforeEnd", html);
+    let mainContainer = document.querySelector("#__shanbay-popover");
+    if (!mainContainer) {
+      mountRoot.insertAdjacentHTML("beforeEnd", html);
+      mainContainer = document.querySelector("#__shanbay-popover");
+    } else if (mainContainer.parentElement !== mountRoot) {
+      mountRoot.appendChild(mainContainer);
     }
-
-    const mainContainer = document.querySelector("#__shanbay-popover");
+    if (!mainContainer) return;
 
     if (res.loading) {
       /** 查询之前和未登录的提示信息*/
@@ -419,12 +527,7 @@ const storage = Object.assign({}, storageSettingMap);
     } else {
       /** 查询单词或者单词其他操作成功*/
       let data = res.data;
-      const esc = (s) =>
-        String(s == null ? "" : s)
-          .replace(/&/g, "&amp;")
-          .replace(/"/g, "&quot;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;");
+      const esc = escapeHtml;
       const assemblyPronunciationStr = () => {
         if (!data.audios || !data.audios.length) {
           debugLogger("warn", "no audios[] on word result");
@@ -471,7 +574,7 @@ const storage = Object.assign({}, storageSettingMap);
           ? `<div><b>中文：</b> ${cnDefs
               .map(
                 (p) =>
-                  `<div><span style="color: #333">${esc(p.pos)} </span><span>${esc(p.def)}</span></div>`
+                  `<div><span style="color: #333">${formatShanbayHtml(p.pos)} </span><span>${formatShanbayHtml(p.def)}</span></div>`
               )
               .join("")}</div>`
           : "";
@@ -480,7 +583,7 @@ const storage = Object.assign({}, storageSettingMap);
           ? `<div><b>英文：</b>${enDefs
               .map(
                 (p) =>
-                  `<div><span style="color: #333">${esc(p.pos)} </span><span>${esc(p.def)}</span></div>`
+                  `<div><span style="color: #333">${formatShanbayHtml(p.pos)} </span><span>${formatShanbayHtml(p.def)}</span></div>`
               )
               .join("")}</div>`
           : "";
@@ -493,16 +596,18 @@ const storage = Object.assign({}, storageSettingMap);
           <a class="check-detail" href="https://web.shanbay.com/wordsweb/#/detail/${esc(data.id)}" target="_blank"> 查看详情 </a>
           <div class="phonetic-symbols">${assemblyPronunciationStr()}</div>
       </div>
-      <div id="shanbay-content">
-          <div class="simple-definition">
-              ${cnHtml}
-              ${enHtml}
+      <div id="shanbay-scroll">
+          <div id="shanbay-content">
+              <div class="simple-definition">
+                  ${cnHtml}
+                  ${enHtml}
+              </div>
+              <div id="shanbay-example-sentence-div" class="hide"></div>
           </div>
-          <div id="shanbay-example-sentence-div" class="hide"></div>
-          <div id="shanbay-footer">
+      </div>
+      <div id="shanbay-footer">
             <span id="shanbay-example-sentence-span" class="hide"><button type="button" id="shanbay-example-sentence-btn" class="shanbay-btn">查看例句</button></span>
             ${data.exists === "error" ? "" : `<span id="shanbay-add-word-span"><button type="button" id="shanbay-add-word-btn" class="shanbay-btn ${data.exists ? "forget" : ""}">${data.exists ? "我忘了" : "添加"}</button></span>`}
-          </div>
       </div>
     `;
       } catch (buildErr) {
@@ -514,6 +619,14 @@ const storage = Object.assign({}, storageSettingMap);
 
       try {
         calculatePopoverPosition();
+        // Re-measure after layout (fonts / multi-line wrap)
+        requestAnimationFrame(() => {
+          try {
+            calculatePopoverPosition();
+          } catch (_) {
+            /* ignore */
+          }
+        });
       } catch (posErr) {
         debugLogger("warn", "calculatePopoverPosition failed", posErr);
         mainContainer.classList.remove("invisible");
@@ -655,10 +768,21 @@ const storage = Object.assign({}, storageSettingMap);
       case "getWordExample":
         if (!exampleSentenceDiv || !Array.isArray(res.data)) break;
         exampleSentenceDiv.innerHTML = res.data
-          .map(
-            (item, index) =>
-              `<p>${index + 1}, ${item.content_en.replaceAll("vocab", "b")} <span class="speaker" data-target="${item.audio.us.urls[0]}"></span></p><p>  ${item.content_cn}</p>`,
-          )
+          .map((item, index) => {
+            const en = formatShanbayHtml(item.content_en);
+            const cn = formatShanbayHtml(item.content_cn);
+            const audioUrl =
+              item.audio &&
+              item.audio.us &&
+              item.audio.us.urls &&
+              item.audio.us.urls[0]
+                ? item.audio.us.urls[0]
+                : "";
+            const speaker = audioUrl
+              ? ` <span class="speaker" data-target="${audioUrl}"></span>`
+              : "";
+            return `<p>${index + 1}, ${en}${speaker}</p><p>  ${cn}</p>`;
+          })
           .join("");
         exampleSentenceDiv.className = "simple-definition";
         if (exampleSentenceSpan) exampleSentenceSpan.innerHTML = "";
