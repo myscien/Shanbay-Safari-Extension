@@ -1,6 +1,59 @@
-import { debugLogger } from './const.mjs'
+import {
+  debugLogger,
+  getRecentLookups,
+  clearRecentLookups,
+  RECENT_LOOKUPS_KEY,
+} from './const.mjs'
 
 const SHANBAY_LOGIN = 'https://web.shanbay.com/web/account/login/'
+
+function detailUrl(item) {
+  if (item && item.id) {
+    return `https://web.shanbay.com/wordsweb/#/detail/${encodeURIComponent(item.id)}`
+  }
+  const q = item && item.word ? encodeURIComponent(item.word) : ''
+  return `https://web.shanbay.com/wordsweb/#/search?query=${q}`
+}
+
+function renderRecent(list) {
+  const ul = document.querySelector('#recent-list')
+  const empty = document.querySelector('#recent-empty')
+  const clearBtn = document.querySelector('#clear-recent')
+  if (!ul) return
+
+  ul.innerHTML = ''
+  if (!list || !list.length) {
+    if (empty) empty.className = ''
+    if (clearBtn) clearBtn.className = 'hide'
+    return
+  }
+  if (empty) empty.className = 'hide'
+  if (clearBtn) clearBtn.className = ''
+
+  list.slice(0, 20).forEach((item) => {
+    const li = document.createElement('li')
+    const a = document.createElement('a')
+    a.href = detailUrl(item)
+    a.target = '_blank'
+    a.rel = 'noopener'
+    const word = document.createElement('span')
+    word.className = 'word'
+    word.textContent = item.word || ''
+    a.appendChild(word)
+    if (item.def) {
+      const def = document.createElement('span')
+      def.className = 'def'
+      def.textContent = item.def
+      a.appendChild(def)
+    }
+    li.appendChild(a)
+    ul.appendChild(li)
+  })
+}
+
+function loadRecent() {
+  getRecentLookups().then(renderRecent).catch(() => renderRecent([]))
+}
 
 function renderUser() {
   const login = document.querySelector('#login')
@@ -23,7 +76,6 @@ function renderUser() {
   }
 
   const applyAuthUI = (info) => {
-    // Support structured { loggedIn, status, message } or legacy string token
     let loggedIn = false
     let status = 'logged_out'
     let message = 'Not logged in'
@@ -62,7 +114,6 @@ function renderUser() {
       }
     }
 
-    // Settings always available; learn actions need login
     if (settingBtn) settingBtn.className = ''
     if (recheck) recheck.className = ''
 
@@ -115,17 +166,25 @@ function renderUser() {
   setTimeout(refreshAuth, 800)
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') refreshAuth()
+    if (document.visibilityState === 'visible') {
+      refreshAuth()
+      loadRecent()
+    }
   })
-  window.addEventListener('focus', refreshAuth)
+  window.addEventListener('focus', () => {
+    refreshAuth()
+    loadRecent()
+  })
 }
 
 document.addEventListener('DOMContentLoaded', function () {
   renderUser()
+  loadRecent()
 
   const batch = document.querySelector('#batch-add')
   const learn = document.querySelector('#begin-learning')
   const options = document.querySelector('#options')
+  const clearRecent = document.querySelector('#clear-recent')
 
   if (batch) {
     batch.onclick = function () {
@@ -141,5 +200,21 @@ document.addEventListener('DOMContentLoaded', function () {
     options.onclick = function () {
       chrome.tabs.create({ url: chrome.runtime.getURL('options.html') })
     }
+  }
+  if (clearRecent) {
+    clearRecent.onclick = function () {
+      clearRecentLookups().then(() => loadRecent())
+    }
+  }
+
+  // Live-update when a lookup is recorded while popup is open
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes[RECENT_LOOKUPS_KEY]) {
+        renderRecent(changes[RECENT_LOOKUPS_KEY].newValue || [])
+      }
+    })
+  } catch (_) {
+    /* ignore */
   }
 })

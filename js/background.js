@@ -2,7 +2,9 @@ import {
   debugLogger, storageSettingMap, lookUp, checkWordAdded,
   addOrForget, getWordExampleSentence, getDailyTaskCount, defaultIgnoreSites,
   getExtensionSettings, SETTINGS_KEY, getAuthToken,
-  normalizeLookupWord, formatLookupError
+  normalizeLookupWord, formatLookupError,
+  pushRecentLookup, snippetFromLookupData, setDebugLogsEnabled,
+  getRecentLookups, clearRecentLookups,
 } from './const.mjs'
 
 const storage = {}
@@ -113,7 +115,16 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
         'Lookup timed out. Open web.shanbay.com, sign in, keep that tab open, then try again.'
       )
         .then((data) => {
-          data.__shanbayExtensionSettings = { autoRead: storage.autoRead }
+          data.__shanbayExtensionSettings = {
+            autoRead: storage.autoRead,
+            autoExampleSentence: storage.autoExampleSentence,
+            exampleSentence: storage.exampleSentence,
+          }
+          pushRecentLookup({
+            word: data.content,
+            id: data.id,
+            def: snippetFromLookupData(data),
+          })
           // Final result via tabs.sendMessage (reliable after long async work)
           replyToSender(tabSender, null, { action: 'lookup', data })
         })
@@ -123,6 +134,12 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
         })
       break
     }
+    case 'getRecentLookups':
+      getRecentLookups().then((list) => sendResponse({ list }))
+      return true
+    case 'clearRecentLookups':
+      clearRecentLookups().then(() => sendResponse({ ok: true }))
+      return true
     case 'addOrForget':
       addOrForget(req.word, req.wordID)
         .then(res => replyToSender(sender, sendResponse, { action: 'addOrForget', data: res }))
@@ -285,7 +302,16 @@ const lookUpBySelection = async (tabId) => {
     const res = await lookUp(word);
     const existsRes = await checkWordAdded(res.id);
     res.exists = existsRes.objects[0].exists;
-    res.__shanbayExtensionSettings = {autoRead: storage.autoRead};
+    res.__shanbayExtensionSettings = {
+      autoRead: storage.autoRead,
+      autoExampleSentence: storage.autoExampleSentence,
+      exampleSentence: storage.exampleSentence,
+    };
+    pushRecentLookup({
+      word: res.content,
+      id: res.id,
+      def: snippetFromLookupData(res),
+    })
 
     // 发送事件，弹窗
     chrome.tabs.sendMessage(tabId, {action: 'lookup', data: res});
@@ -311,6 +337,7 @@ chrome.storage.onChanged.addListener(changes => {
       Object.assign(storage, item)
     })
   }
+  setDebugLogsEnabled(!!storage.debugLogs)
   getDailyTask()
 })
 
@@ -322,6 +349,7 @@ getExtensionSettings((settings) => {
   } else {
     Object.assign(storage, storageSettingMap)
   }
+  setDebugLogsEnabled(!!storage.debugLogs)
 
   // contentMenu (background has no page location; do not use location.hostname here)
   chrome.contextMenus.removeAll(function () {
@@ -357,7 +385,16 @@ getExtensionSettings((settings) => {
             })
         )
         .then(res => {
-          res.__shanbayExtensionSettings = {autoRead: storage.autoRead}
+          res.__shanbayExtensionSettings = {
+            autoRead: storage.autoRead,
+            autoExampleSentence: storage.autoExampleSentence,
+            exampleSentence: storage.exampleSentence,
+          }
+          pushRecentLookup({
+            word: res.content,
+            id: res.id,
+            def: snippetFromLookupData(res),
+          })
           chrome.tabs.sendMessage(tab.id, {action: 'lookup', data: res}).catch(() => {})
           })
         .catch(data =>

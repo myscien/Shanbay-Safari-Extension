@@ -1,10 +1,61 @@
+/* Shanbay Helper page popover — light + dark (prefers-color-scheme) */
+
+#__shanbay-popover {
+    /* Light theme tokens */
+    --sb-bg: #ffffff;
+    --sb-bg-elevated: #ffffff;
+    --sb-text: #555555;
+    --sb-text-strong: #1a1a1a;
+    --sb-text-muted: #999999;
+    --sb-pos: #333333;
+    --sb-border: #eeeeee;
+    --sb-border-soft: #ebebeb;
+    --sb-link: #0088cc;
+    --sb-accent: #28bea0;
+    --sb-accent-soft: rgba(40, 190, 160, 0.45);
+    --sb-danger: #f36c50;
+    --sb-error: rgb(235, 122, 122);
+    --sb-success: #38c2a8;
+    --sb-shadow: 0 2px 10px 0 rgba(0, 0, 0, 0.12);
+    --sb-shadow-focus: 0 2px 10px 0 rgba(0, 0, 0, 0.12), 0 0 0 2px var(--sb-accent-soft);
+    --sb-btn-bg: #ffffff;
+    --sb-scrollbar: rgba(0, 0, 0, 0.25);
+    --sb-arrow-border: #eeeeee;
+    --sb-arrow-fill: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+    #__shanbay-popover {
+        --sb-bg: #1e1f22;
+        --sb-bg-elevated: #25262b;
+        --sb-text: #c8c8cc;
+        --sb-text-strong: #f2f2f4;
+        --sb-text-muted: #8b8b93;
+        --sb-pos: #a8a8b0;
+        --sb-border: #3a3b42;
+        --sb-border-soft: #34353c;
+        --sb-link: #6cb6ff;
+        --sb-accent: #3dd6b5;
+        --sb-accent-soft: rgba(61, 214, 181, 0.5);
+        --sb-danger: #ff8a70;
+        --sb-error: #ff8a8a;
+        --sb-success: #3dd6b5;
+        --sb-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.55);
+        --sb-shadow-focus: 0 4px 20px 0 rgba(0, 0, 0, 0.55), 0 0 0 2px var(--sb-accent-soft);
+        --sb-btn-bg: #2a2b31;
+        --sb-scrollbar: rgba(255, 255, 255, 0.28);
+        --sb-arrow-border: #3a3b42;
+        --sb-arrow-fill: #1e1f22;
+    }
+}
+
 #__shanbay-popover * {
     font-family:
         "PingFangSC-Light", "Helvetica Neue", Helvetica, "Microsoft YaHei",
         "微软雅黑", Arial, SimHei, serif;
     box-sizing: content-box;
     -webkit-box-sizing: content-box !important;
-    color: #666;
+    color: var(--sb-text);
     -webkit-font-smoothing: unset;
 }
 
@@ -17,6 +68,14 @@
     display: inline-block;
     vertical-align: text-bottom;
     padding-left: 8px;
+    opacity: 0.95;
+}
+
+@media (prefers-color-scheme: dark) {
+    #__shanbay-popover .speaker {
+        /* Slight lift so blue icon stays readable on dark panels */
+        filter: brightness(1.25) saturate(1.05);
+    }
 }
 
 #__shanbay-popover .hide {
@@ -45,17 +104,17 @@
 }
 
 #__shanbay-popover #addResult {
-    color: #38c2a8;
+    color: var(--sb-success);
 }
 
 #__shanbay-popover a {
     font-weight: normal;
-    color: #08c;
+    color: var(--sb-link);
     text-decoration: none;
 }
 
-#__shabay-popover a:hover {
-    color: #08c;
+#__shanbay-popover a:hover {
+    color: var(--sb-link);
     font-weight: normal;
     text-decoration: underline;
     background: transparent;
@@ -67,12 +126,12 @@
 
 #__shanbay-popover .shanbay-btn {
     height: 24px;
-    color: #28bea0 !important;
+    color: var(--sb-accent) !important;
     font-size: 14px;
     padding: 0 11px !important;
     border-radius: 4px;
-    background: #fff;
-    border: 1px solid #28bea0;
+    background: var(--sb-btn-bg);
+    border: 1px solid var(--sb-accent);
     cursor: pointer;
     min-height: auto;
     min-width: auto;
@@ -87,16 +146,16 @@
 
 #__shanbay-popover .forget {
     height: 26px;
-    color: #f36c50 !important;
-    border: 1px solid #f36c50;
+    color: var(--sb-danger) !important;
+    border: 1px solid var(--sb-danger);
 }
 
 #__shanbay-popover .shanbay-btn:hover,
 #__shanbay-popover .shanbay-btn:focus,
 #__shanbay-popover .shanbay-btn:active,
 #__shanbay-popover .shanbay-btn.active {
-    color: #28bea0;
-    background: #fff;
+    color: var(--sb-accent);
+    background: var(--sb-btn-bg);
 }
 
 #__shanbay-popover {
@@ -110,11 +169,11 @@
     width: 320px;
     padding: 1px !important;
     text-align: left;
-    background-color: #fff;
+    background-color: var(--sb-bg);
     background-clip: padding-box;
-    border: 1px solid #eee;
+    border: 1px solid var(--sb-border);
     border-radius: 6px;
-    box-shadow: 0 2px 10px 0 rgba(170, 170, 170, 0.5);
+    box-shadow: var(--sb-shadow);
     white-space: normal;
     /* Arrow sits outside the inner box — do not clip it here */
     overflow: visible !important;
@@ -123,18 +182,27 @@
     opacity: 1;
     height: auto !important;
     max-height: none;
-    transition: opacity 0.15s linear;
+    transition: opacity 0.15s linear, background-color 0.15s linear, border-color 0.15s linear;
+    /* Keyboard focus target for shortcuts (no heavy outline) */
+    outline: none !important;
+    color-scheme: light dark;
+}
+
+#__shanbay-popover:focus,
+#__shanbay-popover:focus-visible {
+    outline: none !important;
+    box-shadow: var(--sb-shadow-focus);
 }
 
 #__shanbay-popover #shanbay-title {
     flex: 0 0 auto;
-    background-color: white;
+    background-color: var(--sb-bg-elevated);
     margin: 0 !important;
     padding: 8px 14px !important;
     font-size: 14px;
     font-weight: normal;
     line-height: 18px;
-    border-bottom: 1px solid #ebebeb;
+    border-bottom: 1px solid var(--sb-border-soft);
 }
 
 #__shanbay-popover #shanbay-title.has-error {
@@ -142,13 +210,21 @@
 }
 
 #__shanbay-popover #shanbay-title.has-error .error-message {
-    color: rgb(235, 122, 122);
+    color: var(--sb-error);
     text-align: center;
 }
 
 #__shanbay-popover #shanbay-title.has-error .login {
     text-align: center;
     margin-top: 16px;
+}
+
+#__shanbay-popover #shanbay-title.has-error .login-hint {
+    font-size: 12px;
+    color: var(--sb-text-muted);
+    text-align: center;
+    margin-top: 8px;
+    line-height: 1.4;
 }
 
 #__shanbay-popover #shanbay-title .check-detail {
@@ -168,7 +244,8 @@
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
-    scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+    scrollbar-color: var(--sb-scrollbar) transparent;
+    background-color: var(--sb-bg);
 }
 
 #__shanbay-popover #shanbay-scroll::-webkit-scrollbar {
@@ -176,7 +253,7 @@
 }
 
 #__shanbay-popover #shanbay-scroll::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.25);
+    background: var(--sb-scrollbar);
     border-radius: 3px;
 }
 
@@ -191,23 +268,31 @@
     overflow-wrap: anywhere;
 }
 
+#__shanbay-popover .def-pos {
+    color: var(--sb-pos);
+}
+
+#__shanbay-popover .def-text {
+    color: var(--sb-text);
+}
+
 /* Headword highlighted from Shanbay <vocab>…</vocab> markup */
 #__shanbay-popover b.shanbay-vocab {
     font-weight: 700 !important;
-    color: #1a1a1a !important;
+    color: var(--sb-text-strong) !important;
 }
 
 #__shanbay-popover #shanbay-example-sentence-div {
     padding: 10px 0;
-    border-top: 1px solid #ebebeb;
+    border-top: 1px solid var(--sb-border-soft);
 }
 
 /* Sticky footer: always visible under the scrollable definition body */
 #__shanbay-popover #shanbay-footer {
     flex: 0 0 auto;
     overflow: hidden;
-    background-color: #fff;
-    border-top: 1px solid #ebebeb;
+    background-color: var(--sb-bg-elevated);
+    border-top: 1px solid var(--sb-border-soft);
     padding: 8px 14px !important;
     box-sizing: border-box !important;
 }
@@ -243,14 +328,14 @@
 #__shanbay-popover #shanbay-arrow {
     left: 50%;
     border-top-width: 0;
-    border-bottom-color: #eee;
+    border-bottom-color: var(--sb-arrow-border);
 }
 
 #__shanbay-popover #shanbay-arrow:after {
     top: 1px;
     margin-left: -10px !important;
     border-top-width: 0;
-    border-bottom-color: #fff;
+    border-bottom-color: var(--sb-arrow-fill);
 }
 
 #__shanbay-popover #shanbay-inner {
@@ -259,7 +344,7 @@
     max-width: 316px;
     box-sizing: border-box !important;
     border-radius: 6px;
-    background-color: #fff;
+    background-color: var(--sb-bg);
     box-shadow: none;
     display: flex !important;
     flex-direction: column !important;
@@ -271,6 +356,7 @@
 #__shanbay-popover #shanbay-title .word {
     font-size: 25px;
     font-weight: normal;
+    color: var(--sb-text-strong);
     font-family:
         Lucida Sans Unicode,
         Lucida Grande,

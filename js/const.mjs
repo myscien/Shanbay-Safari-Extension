@@ -4,10 +4,19 @@
  * @copyright 2017-2020 maicss
  * */
 
-/** 检测是否是开发模式，用来控制日志的输出
+/** 检测是否是开发模式（unpacked / no store update_url）
  * @type {boolean}
  * */
 const devMode = !("update_url" in chrome.runtime.getManifest());
+
+/** Runtime flag: verbose console logs (settings.debugLogs or ?debug=1). Default off. */
+let debugLogsEnabled = false;
+
+export const setDebugLogsEnabled = (enabled) => {
+  debugLogsEnabled = !!enabled;
+};
+
+export const isDebugLogsEnabled = () => debugLogsEnabled;
 
 /** 解析每日需要复习单词接口返回的加密字符串。从源码里扒出来的  */
 const decodeDailyTaskResponse = (encryptedString) => {
@@ -268,8 +277,88 @@ const decodeDailyTaskResponse = (encryptedString) => {
  * @param {*} msg log信息
  * @summary 如果是任何情况下都要打印的信息，就用console，如果只是调试的信息，就用debugLogger
  * */
+/**
+ * Verbose logging — only when debugLogs is enabled in settings (or forced in tests).
+ * Hard failures may still use console.error outside this helper.
+ */
 export const debugLogger = (level, ...msg) => {
-  if (devMode) console[level](...msg);
+  if (!debugLogsEnabled) return;
+  try {
+    if (typeof console[level] === "function") console[level](...msg);
+    else console.log(...msg);
+  } catch (_) {
+    /* ignore */
+  }
+};
+
+/** Recent successful lookups (toolbar popup history). */
+export const RECENT_LOOKUPS_KEY = "__shanbayRecentLookups";
+export const MAX_RECENT_LOOKUPS = 20;
+
+/**
+ * Prepend a successful lookup; dedupe by word (case-insensitive).
+ * @param {{ word: string, id?: string|number, def?: string }} entry
+ * @returns {Promise<void>}
+ */
+export const pushRecentLookup = (entry) =>
+  new Promise((resolve) => {
+    try {
+      const word = String((entry && entry.word) || "").trim();
+      if (!word) {
+        resolve();
+        return;
+      }
+      chrome.storage.local.get([RECENT_LOOKUPS_KEY], (r) => {
+        let list = Array.isArray(r[RECENT_LOOKUPS_KEY]) ? r[RECENT_LOOKUPS_KEY] : [];
+        const lower = word.toLowerCase();
+        list = list.filter((x) => String(x.word || "").toLowerCase() !== lower);
+        list.unshift({
+          word,
+          id: entry.id != null ? String(entry.id) : "",
+          def: entry.def ? String(entry.def).slice(0, 80) : "",
+          at: Date.now(),
+        });
+        list = list.slice(0, MAX_RECENT_LOOKUPS);
+        chrome.storage.local.set({ [RECENT_LOOKUPS_KEY]: list }, () => resolve());
+      });
+    } catch (_) {
+      resolve();
+    }
+  });
+
+/**
+ * @returns {Promise<Array<{word:string,id:string,def:string,at:number}>>}
+ */
+export const getRecentLookups = () =>
+  new Promise((resolve) => {
+    try {
+      chrome.storage.local.get([RECENT_LOOKUPS_KEY], (r) => {
+        resolve(Array.isArray(r[RECENT_LOOKUPS_KEY]) ? r[RECENT_LOOKUPS_KEY] : []);
+      });
+    } catch (_) {
+      resolve([]);
+    }
+  });
+
+export const clearRecentLookups = () =>
+  new Promise((resolve) => {
+    try {
+      chrome.storage.local.remove([RECENT_LOOKUPS_KEY], () => resolve());
+    } catch (_) {
+      resolve();
+    }
+  });
+
+/** Build a short definition snippet from lookUp API payload. */
+export const snippetFromLookupData = (data) => {
+  if (!data || !data.definitions) return "";
+  const defs = data.definitions;
+  const cn = Array.isArray(defs.cn) ? defs.cn : [];
+  const en = Array.isArray(defs.en) ? defs.en : [];
+  const first = cn[0] || en[0];
+  if (!first) return "";
+  const pos = first.pos ? String(first.pos) + " " : "";
+  return (pos + String(first.def || "")).trim().slice(0, 80);
 };
 
 /** Settings storage key shared across background / content / options */
@@ -958,6 +1047,8 @@ const extensionSpecification = [
   {autoRead: "false", desc: "Auto pronunciation", enum: ["en", "us", "false"], type: "select"},
   {paraphrase: "bilingual", desc: "Default definitions", enum: ["Chinese", "English", "bilingual"], type: "select"},
   {exampleSentence: true, desc: "Show example-sentence button", enum: [true, false], type: "radio"},
+  {autoExampleSentence: false, desc: "Auto-show example sentences", enum: [true, false], type: "radio"},
+  {debugLogs: false, desc: "Verbose debug logs in console", enum: [true, false], type: "radio"},
   { ignoreSites: [], desc: "Blocked sites", type: "textarea" },
 ];
 // 默认屏蔽的网站

@@ -4,7 +4,7 @@
 
 Chrome 商店地址：https://chrome.google.com/webstore/detail/%E6%89%87%E8%B4%9D%E5%8A%A9%E6%89%8Bv2/pkibohmmnmpgbnaoappgndlfncanookc
 
-当前版本：**2.3.0**（Safari 兼容与稳定性改进）
+当前版本：**2.3.2**（英文界面、Safari 工具链、弹窗体验增强）
 
 ## 安装
 
@@ -59,6 +59,7 @@ Chrome 商店地址：https://chrome.google.com/webstore/detail/%E6%89%87%E8%B4%
 
 
 ## 更新记录：
+- 2026.7 v2.3.2+ 英文界面；登录状态与错误提示；选词增强；最近查词；自动例句；弹窗快捷键与自动聚焦；默认关闭调试日志；暗色弹窗；Safari 一键 rebuild
 - 2026.7 v2.3.0 Safari Web Extension 兼容：跨浏览器消息与发音、登录会话回退、存储 local 回退；清理调试日志；安装文档与脚本
 - 2018年之前，使用的是扇贝开放API。~~虽然没有官方自己用的库全，API更好用~~
 - 2020.10 扇贝关闭了原来的2.0API，使用了新的3.0API，插件改成直接调官方未开放的API。
@@ -66,3 +67,73 @@ Chrome 商店地址：https://chrome.google.com/webstore/detail/%E6%89%87%E8%B4%
 - 2023.2 更新到 Chrome manifest v3，修改一个小 BUG。
 - 2023.8 重写了播放音频的功能；增加了用户自定义屏蔽双击弹窗的域名；shanbay把*今日复习*接口重写为返回一个加密字符串（越来越封闭）,扒了源码做出来了；未登录提示由通知改为弹窗上提示了，因为用户如果禁用了浏览器通知，导致什么提示也看不到，基本功能都无法使用
 - 2025.11 自适应弹窗位置; 增加对textarea 内文本的支持
+
+---
+
+## English (new features & workflow)
+
+> The **product UI is English**. The section above keeps the original Chinese docs; below is the updated English guide for recent work.
+
+### Version
+
+**2.3.2** — English UI, Safari tooling, popover UX upgrades.
+
+### Install (summary)
+
+**Chrome / Edge:** Load this folder unpacked under Developer mode.
+
+**Safari (macOS):**
+
+```bash
+# first-time signing setup
+./scripts/install-safari-permanent.sh
+
+# after code changes (sync + xcodebuild + open app)
+./scripts/rebuild-safari.sh
+```
+
+See **[SAFARI.md](./SAFARI.md)** for Team signing, permissions, and troubleshooting.
+
+- Log into [web.shanbay.com](https://web.shanbay.com) **in the same browser** you use for lookup  
+- Source of truth: this repo · Safari Xcode project: `../chrome-shanbay-v2-safari/` (sync via scripts; don’t hand-edit Resources long-term)
+
+### Features (including recent)
+
+**Lookup**
+- Double-click or context-menu lookup  
+- Smarter selection: strips punctuation/quotes; keeps hyphens / apostrophes (`well-known`, `don't`)  
+- Chinese / English / bilingual definitions  
+- UK / US audio; bold headwords from Shanbay `<vocab>` tags  
+
+**Popover**
+- Viewport-fixed, tall panel with sticky footer (Examples / Add / Forgot always visible)  
+- Auto-focus for keyboard shortcuts  
+- System **light / dark** appearance  
+
+**Shortcuts** (popover open)
+
+| Key | Action |
+|-----|--------|
+| `Esc` | Close |
+| `A` | Add |
+| `F` | Forget |
+| `E` | Examples |
+| `1` / `2` | UK / US audio |
+
+**Toolbar popup**
+- Login status + recheck  
+- Recent lookups (last 20)  
+- Settings: auto examples, debug logs (off by default), blocked sites, etc.
+
+### Known limitations (same as above)
+
+- API definition quality varies  
+- Nested iframes not supported  
+- Some `input`/`textarea` double-clicks still mis-position the popover  
+- Safari may need per-site extension access  
+
+### Changelog (English, recent)
+
+- **2.3.2+** — English UI; clearer login/errors; smarter selection; recent lookups; optional auto examples; shortcuts + auto-focus; quiet logs; dark-mode popover; Safari one-command rebuild  
+- **2.3.0** — Safari Web Extension support; messaging/audio/storage fallbacks; install docs  
+- Earlier history: see Chinese 更新记录 above / git log  

@@ -47,10 +47,30 @@
             <h3>Show example-sentence button</h3>
             <p>
                 <label>
-                    <input type="radio" name="exampleSentence" value="true"> Yes
-                    <input type="radio" name="exampleSentence" value="false" checked> No
+                    <input type="radio" name="exampleSentence" value="true" checked> Yes
+                    <input type="radio" name="exampleSentence" value="false"> No
                 </label>
             </p>
+        </li>
+        <li>
+            <h3>Auto-show example sentences</h3>
+            <p>
+                <label>
+                    <input type="radio" name="autoExampleSentence" value="true"> Yes
+                    <input type="radio" name="autoExampleSentence" value="false" checked> No
+                </label>
+            </p>
+            <p style="font-size:12px;color:#888;">When Yes, load examples automatically after each lookup (you can still press E).</p>
+        </li>
+        <li>
+            <h3>Verbose debug logs (browser console)</h3>
+            <p>
+                <label>
+                    <input type="radio" name="debugLogs" value="true"> Yes
+                    <input type="radio" name="debugLogs" value="false" checked> No
+                </label>
+            </p>
+            <p style="font-size:12px;color:#888;">Off by default. Turn on only when diagnosing issues.</p>
         </li>
         <li>
             <h3>Study reminder every 3 hours <i>(ensure browser notifications are allowed)</i></h3>
@@ -112,6 +132,7 @@
         </p>
         <p>2. <a href="https://github.com/maicss/chrome-shanbay-v2/issues/new/choose">GitHub issue</a></p>
         <hr>
+        <p><b>Popover shortcuts:</b> Esc close · A add · F forget · E examples · 1 UK audio · 2 US audio</p>
         <p>Enjoy the extension — and keep learning English.</p>
     </details>
 </div>

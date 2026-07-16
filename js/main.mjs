@@ -6,24 +6,11 @@ import {
   playAudio,
   SETTINGS_KEY,
   normalizeLookupWord,
+  setDebugLogsEnabled,
 } from './const.mjs';
 
 // Bump this string whenever content-script behavior changes — check DevTools console.
-export const CONTENT_BUILD = "2026-07-16-en-ux-v7";
-try {
-  const manifestVersion =
-    typeof chrome !== "undefined" &&
-    chrome.runtime &&
-    typeof chrome.runtime.getManifest === "function"
-      ? chrome.runtime.getManifest().version
-      : "?";
-  console.info(
-    `%c[Shanbay Helper] content loaded  build=${CONTENT_BUILD}  manifest=${manifestVersion}`,
-    "color:#28bea0;font-weight:bold;",
-  );
-} catch (_) {
-  /* ignore */
-}
+export const CONTENT_BUILD = "2026-07-16-dark-popover-v11";
 
 // Content script entry (ES module). Safari gets an IIFE bundle of this file.
 // Default settings immediately so double-click works before storage returns.
@@ -77,16 +64,28 @@ const storage = Object.assign({}, storageSettingMap);
   /**
    * 从 chrome.storage 获取插件设置（sync 优先，Safari 等环境回退 local）
    * */
+  const applyStorageDefaults = () => {
+    if (storage.clickLookup === undefined) storage.clickLookup = true;
+    if (storage.contextLookup === undefined) storage.contextLookup = true;
+    if (storage.exampleSentence === undefined) storage.exampleSentence = true;
+    if (storage.autoExampleSentence === undefined)
+      storage.autoExampleSentence = false;
+    if (storage.debugLogs === undefined) storage.debugLogs = false;
+    setDebugLogsEnabled(!!storage.debugLogs);
+    debugLogger(
+      "info",
+      `[Shanbay Helper] content build=${CONTENT_BUILD}`,
+      storage,
+    );
+  };
+
   getExtensionSettings((settings) => {
-    debugLogger("info", "chrome storage loaded", settings);
     if (settings[SETTINGS_KEY] && Object.keys(settings[SETTINGS_KEY]).length) {
       settings[SETTINGS_KEY].forEach((item) => {
         Object.assign(storage, item);
       });
     }
-    // Ensure required defaults if missing from stored settings
-    if (storage.clickLookup === undefined) storage.clickLookup = true;
-    if (storage.contextLookup === undefined) storage.contextLookup = true;
+    applyStorageDefaults();
   });
 
   /**
@@ -99,6 +98,7 @@ const storage = Object.assign({}, storageSettingMap);
     change.newValue.forEach((item) => {
       Object.assign(storage, item);
     });
+    setDebugLogsEnabled(!!storage.debugLogs);
   });
   /**
    * 双击事件和右键选中后的事件处理器。
@@ -447,9 +447,42 @@ const storage = Object.assign({}, storageSettingMap);
       arrowEl.style.rotate = arrow.rotate;
     }
 
-    console.info(
-      `[Shanbay Helper] popover layout  build=${CONTENT_BUILD}  natural=${naturalHeight}px  max=${maxInnerHeight}px  scroll=${needsScroll}  viewportRatio=${VIEWPORT_HEIGHT_RATIO}`,
+    // Focus so keyboard shortcuts work without clicking the popover first
+    focusPopover(mainContainer);
+
+    debugLogger(
+      "info",
+      `[Shanbay Helper] popover layout  build=${CONTENT_BUILD}  natural=${naturalHeight}px  max=${maxInnerHeight}px  scroll=${needsScroll}`,
     );
+  }
+
+  /**
+   * Make the popover keyboard-focusable and move focus into it (no page scroll).
+   * Required for reliable Esc/A/E/1/2 shortcuts, especially on Safari.
+   */
+  function focusPopover(el) {
+    if (!el) return;
+    try {
+      if (!el.hasAttribute("tabindex")) {
+        el.setAttribute("tabindex", "-1");
+      }
+      el.setAttribute("role", "dialog");
+      el.setAttribute("aria-label", "Shanbay Helper lookup");
+      // Defer until after layout / paint so focus sticks
+      requestAnimationFrame(() => {
+        try {
+          el.focus({ preventScroll: true });
+        } catch (_) {
+          try {
+            el.focus();
+          } catch (__) {
+            /* ignore */
+          }
+        }
+      });
+    } catch (_) {
+      /* ignore */
+    }
   }
 
   /**
@@ -466,7 +499,7 @@ const storage = Object.assign({}, storageSettingMap);
     }
 
     /** 先根据选区确定弹出框的位置，生成弹出框，然后根据参数和设置，往里面插入内容*/
-    let html = `<div id="__shanbay-popover" class="invisible">
+    let html = `<div id="__shanbay-popover" class="invisible" tabindex="-1" role="dialog" aria-label="Shanbay Helper lookup">
       <div id="shanbay-arrow"></div>
       <div id="shanbay-inner">
         <div id="shanbay-title" style="border: none;"></div>
@@ -501,8 +534,9 @@ const storage = Object.assign({}, storageSettingMap);
         calculatePopoverPosition();
       } catch (e) {
         mainContainer.classList.remove("invisible");
-        mainContainer.style.top = window.scrollY + 80 + "px";
-        mainContainer.style.left = window.scrollX + 80 + "px";
+        mainContainer.style.top = "80px";
+        mainContainer.style.left = "80px";
+        focusPopover(mainContainer);
       }
     } else if (res.data && res.data.msg) {
       const st = res.data.status;
@@ -515,7 +549,7 @@ const storage = Object.assign({}, storageSettingMap);
             <a href="https://web.shanbay.com/web/account/login/" target="_blank" class="shanbay-btn">Log in</a>
             <a href="https://web.shanbay.com/" target="_blank" class="shanbay-btn">Open Shanbay</a>
           </div>
-          <div style="font-size:12px;color:#999;text-align:center;margin-top:8px;line-height:1.4;">After logging in, refresh this page and look up again</div>`
+          <div class="login-hint">After logging in, refresh this page and look up again</div>`
         : "";
       mainContainer.querySelector("#shanbay-inner").innerHTML = `
     <div id="shanbay-title" class="has-error">
@@ -584,7 +618,7 @@ const storage = Object.assign({}, storageSettingMap);
           ? `<div><b>Chinese:</b> ${cnDefs
               .map(
                 (p) =>
-                  `<div><span style="color: #333">${formatShanbayHtml(p.pos)} </span><span>${formatShanbayHtml(p.def)}</span></div>`
+                  `<div><span class="def-pos">${formatShanbayHtml(p.pos)} </span><span class="def-text">${formatShanbayHtml(p.def)}</span></div>`
               )
               .join("")}</div>`
           : "";
@@ -593,7 +627,7 @@ const storage = Object.assign({}, storageSettingMap);
           ? `<div><b>English:</b> ${enDefs
               .map(
                 (p) =>
-                  `<div><span style="color: #333">${formatShanbayHtml(p.pos)} </span><span>${formatShanbayHtml(p.def)}</span></div>`
+                  `<div><span class="def-pos">${formatShanbayHtml(p.pos)} </span><span class="def-text">${formatShanbayHtml(p.def)}</span></div>`
               )
               .join("")}</div>`
           : "";
@@ -695,9 +729,10 @@ const storage = Object.assign({}, storageSettingMap);
         "#shanbay-example-sentence-span",
       );
 
-      /** 添加单词和忘记单词的事件处理*/
+      /** Add / Forgot */
       const addWordBtn = mainContainer.querySelector("#shanbay-add-word-btn");
       const sendAddOrForget = () => {
+        if (!addWordBtn || addWordBtn.classList.contains("hide")) return;
         chrome.runtime.sendMessage(
           {
             action: "addOrForget",
@@ -713,32 +748,67 @@ const storage = Object.assign({}, storageSettingMap);
           }
         );
       };
-      if (data.exists === true) {
-        addWordBtn.addEventListener("click", sendAddOrForget);
-      } else if (data.exists === false) {
-        if (storage.addBook) {
-          addWordBtn.className = "hide";
-          sendAddOrForget();
-        } else {
+      if (addWordBtn) {
+        if (data.exists === true) {
           addWordBtn.addEventListener("click", sendAddOrForget);
+        } else if (data.exists === false) {
+          if (storage.addBook) {
+            addWordBtn.className = "hide";
+            sendAddOrForget();
+          } else {
+            addWordBtn.addEventListener("click", sendAddOrForget);
+          }
         }
       }
 
-      if (storage.exampleSentence) {
-        exampleSentenceSpan.classList.remove("hide");
-        exampleSentenceBtn.addEventListener("click", () => {
-          chrome.runtime.sendMessage(
-            { action: "getWordExample", id: data.id },
-            (response) => {
-              if (chrome.runtime.lastError) {
-                debugLogger("warn", chrome.runtime.lastError.message);
-                return;
-              }
-              if (response) handleBackgroundMessage(response);
+      const requestExamples = () => {
+        if (!data.id) return;
+        chrome.runtime.sendMessage(
+          { action: "getWordExample", id: data.id },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              debugLogger("warn", chrome.runtime.lastError.message);
+              return;
             }
-          );
-        });
+            if (response) handleBackgroundMessage(response);
+          }
+        );
+      };
+
+      const showExampleButton =
+        storage.exampleSentence !== false || storage.autoExampleSentence;
+      if (showExampleButton && exampleSentenceSpan && exampleSentenceBtn) {
+        exampleSentenceSpan.classList.remove("hide");
+        exampleSentenceBtn.addEventListener("click", requestExamples);
       }
+
+      // Optional: auto-load examples after definition render
+      if (storage.autoExampleSentence) {
+        requestExamples();
+      }
+
+      // Expose actions for keyboard shortcuts
+      mainContainer.__shanbayActions = {
+        /** A — add new word */
+        add: () => {
+          if (data.exists === false) sendAddOrForget();
+        },
+        /** F — mark as forgotten (already in book) */
+        forget: () => {
+          if (data.exists === true) sendAddOrForget();
+        },
+        examples: requestExamples,
+        playUk: () => {
+          const btn = mainContainer.querySelector(".speaker.uk");
+          if (btn)
+            playAudio(btn.getAttribute("data-target") || btn.dataset.target);
+        },
+        playUs: () => {
+          const btn = mainContainer.querySelector(".speaker.us");
+          if (btn)
+            playAudio(btn.getAttribute("data-target") || btn.dataset.target);
+        },
+      };
     }
   };
 
@@ -831,6 +901,61 @@ const storage = Object.assign({}, storageSettingMap);
     }, delay || 0);
   };
 
+  /** Keyboard: Esc close · A add · F forget · E examples · 1 UK · 2 US */
+  const onPopoverKeydown = (e) => {
+    const pop = document.querySelector("#__shanbay-popover");
+    if (!pop || pop.classList.contains("invisible")) return;
+
+    // Allow shortcuts when focus is on the popover OR anywhere on the page
+    // (except real form fields the user is typing into).
+    const tag = (e.target && e.target.tagName) || "";
+    const inField =
+      tag === "INPUT" ||
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      (e.target && e.target.isContentEditable);
+    if (inField && !pop.contains(e.target)) return;
+
+    const key = e.key;
+    const actions = pop.__shanbayActions || {};
+
+    if (key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      hidePopover();
+      return;
+    }
+    if (key === "a" || key === "A") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof actions.add === "function") actions.add();
+      return;
+    }
+    if (key === "f" || key === "F") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof actions.forget === "function") actions.forget();
+      return;
+    }
+    if (key === "e" || key === "E") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof actions.examples === "function") actions.examples();
+      return;
+    }
+    if (key === "1") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof actions.playUk === "function") actions.playUk();
+      return;
+    }
+    if (key === "2") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof actions.playUs === "function") actions.playUs();
+    }
+  };
+
   if (
     document.addEventListener ||
     event.type === "load" ||
@@ -847,6 +972,6 @@ const storage = Object.assign({}, storageSettingMap);
         }
       }
     });
-    // })
+    document.addEventListener("keydown", onPopoverKeydown, true);
   }
 
