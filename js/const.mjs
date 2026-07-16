@@ -462,11 +462,11 @@ export const playAudio = (url) => {
  * chrome 通知处理方法, 传入的参数就是chrome notifications的参数
  * @function notify
  * @param {object} opt - chrome notifications 的参数
- * @param {string} opt.title=人丑多读书 - notifications title
- * @param {string} [opt.message=少壮不努力，老大背单词] - notifications message
+ * @param {string} opt.title=Shanbay Helper - notifications title
+ * @param {string} [opt.message=Time to review your Shanbay words] - notifications message
  * @param {string} [opt.url=https://www.shanbay.com/] - notifications url, notifications可以点击跳转
  * */
-export const notify = (opt = {title: '人丑多读书', message: '少壮不努力，老大背单词', url: 'https://www.shanbay.com/'}) => {
+export const notify = (opt = {title: 'Shanbay Helper', message: 'Time to review your Shanbay words', url: 'https://www.shanbay.com/'}) => {
   // chrome.notifications is not available in Safari Web Extensions
   if (!chrome.notifications || !chrome.notifications.create) {
     debugLogger("warn", "notifications API unavailable; badge-only reminder", opt.message);
@@ -577,7 +577,7 @@ export const withTimeout = (promise, ms, message) =>
   Promise.race([
     promise,
     new Promise((_, reject) => {
-      setTimeout(() => reject({ status: 504, msg: message || `超时 (${ms}ms)` }), ms);
+      setTimeout(() => reject({ status: 504, msg: message || `Timed out (${ms}ms)` }), ms);
     }),
   ]);
 
@@ -644,7 +644,7 @@ const getOrOpenShanbayTab = async () => {
           if (chrome.runtime.lastError || !t) {
             reject(
               new Error(
-                chrome.runtime.lastError?.message || "无法打开扇贝页面"
+                chrome.runtime.lastError?.message || "Could not open Shanbay page"
               )
             );
             return;
@@ -733,20 +733,20 @@ const fetchInShanbayPage = async (url, options = {}) => {
     results = await withTimeout(
       runInject(true),
       8000,
-      "扇贝页面请求超时"
+      "Shanbay page request timed out"
     );
   } catch (mainWorldErr) {
     debugLogger("warn", "MAIN world inject failed, try isolated", mainWorldErr);
     results = await withTimeout(
       runInject(false),
       8000,
-      "扇贝页面请求超时"
+      "Shanbay page request timed out"
     );
   }
 
   const result = results && results[0] && results[0].result;
   if (!result) {
-    throw new Error("扇贝页面执行脚本无返回（请打开 web.shanbay.com 并登录）");
+    throw new Error("No response from Shanbay page (open web.shanbay.com and sign in)");
   }
   return result;
 };
@@ -818,7 +818,7 @@ export const request = async (url, options = {}) => {
       mode: "cors",
     });
     if (res.ok) return res.arrayBuffer();
-    return Promise.reject({ status: res.status, msg: "音频加载失败" });
+    return Promise.reject({ status: res.status, msg: "Audio failed to load" });
   }
 
   let directBody = null;
@@ -836,12 +836,12 @@ export const request = async (url, options = {}) => {
     try {
       directBody = await res.json();
     } catch (_) {
-      directBody = { msg: res.statusText || "请求失败" };
+      directBody = { msg: res.statusText || "Request failed" };
     }
     if (directOk) return directBody;
   } catch (e) {
     debugLogger("warn", "direct fetch failed", e);
-    directBody = { msg: e && e.message ? e.message : "请求失败" };
+    directBody = { msg: e && e.message ? e.message : "Request failed" };
   }
 
   // --- Path B (Safari): fetch inside a real Shanbay tab page context ---
@@ -863,14 +863,14 @@ export const request = async (url, options = {}) => {
           headers: pageHeaders,
         }),
         12000,
-        "查询超时：请打开 web.shanbay.com 并登录后重试"
+        "Lookup timed out. Open web.shanbay.com, sign in, then try again."
       );
       if (pageResult.ok) {
         return pageResult.data;
       }
       const msg =
         (pageResult.data && (pageResult.data.msg || pageResult.data.message)) ||
-        "登录信息过期";
+        "Session expired";
       const status = isAuthErrorBody(pageResult.status, pageResult.data)
         ? 401
         : pageResult.status || 401;
@@ -879,7 +879,7 @@ export const request = async (url, options = {}) => {
         ...(pageResult.data || {}),
         msg:
           status === 401
-            ? "登录信息过期：请在 Safari 打开 web.shanbay.com 并重新登录，保持该标签页打开后再查词"
+            ? "Session expired: open web.shanbay.com in this browser, sign in again, keep that tab open, then look up again."
             : msg,
       });
     } catch (e) {
@@ -888,19 +888,19 @@ export const request = async (url, options = {}) => {
         (e && e.msg) ||
         (e && e.message) ||
         String(e) ||
-        "无法使用扇贝登录态";
+        "Could not use Shanbay session";
       return Promise.reject({
         status: (e && e.status) || 401,
         msg:
           /超时|timeout/i.test(msg)
             ? msg
-            : "无法使用扇贝登录态：请打开 https://web.shanbay.com 并登录，保持标签页打开后重试。详情: " +
+            : "Could not use Shanbay session: open https://web.shanbay.com, sign in, keep the tab open, then try again. Details: " +
               msg,
       });
     }
   }
 
-  const msg = (directBody && (directBody.msg || directBody.message)) || "请求失败";
+  const msg = (directBody && (directBody.msg || directBody.message)) || "Request failed";
   const status =
     isAuthErrorBody(directStatus, directBody) ? 401 : directStatus || 500;
   return Promise.reject({ status, ...(directBody || {}), msg });
@@ -950,15 +950,15 @@ const shanbayAPI = {
  * @property {Array} enum - 取值范围
  * */
 const extensionSpecification = [
-  {clickLookup: true, desc: "双击选中查词",  enum: [true, false], type: "radio"},
-  {contextLookup: true, desc: "右键查词", enum: [true, false], type: "radio"},
-  {addBook: false, desc: "默认添加到单词本", enum: [true, false], type: "radio"},
-  {alarm: true, desc: "定时提醒", enum: [true, false], type: "radio"},
-  {reminderContent: '少壮不努力，老大背单词', desc: '提示框内容', type: 'text'},
-  {autoRead: "false", desc: "自动发音", enum: ["en", "us", "false"], type: "select"},
-  {paraphrase: "bilingual", desc: "默认释义", enum: ["Chinese", "English", "bilingual"], type: "select"},
-  {exampleSentence: true, desc: "显示例句按钮", enum: [true, false], type: "radio"},
-  { ignoreSites: [], desc: "忽略站点", type: "textarea" },
+  {clickLookup: true, desc: "Double-click lookup",  enum: [true, false], type: "radio"},
+  {contextLookup: true, desc: "Context-menu lookup", enum: [true, false], type: "radio"},
+  {addBook: false, desc: "Auto-add to vocabulary book", enum: [true, false], type: "radio"},
+  {alarm: true, desc: "Study reminder", enum: [true, false], type: "radio"},
+  {reminderContent: 'Time to review your Shanbay words', desc: 'Reminder text', type: 'text'},
+  {autoRead: "false", desc: "Auto pronunciation", enum: ["en", "us", "false"], type: "select"},
+  {paraphrase: "bilingual", desc: "Default definitions", enum: ["Chinese", "English", "bilingual"], type: "select"},
+  {exampleSentence: true, desc: "Show example-sentence button", enum: [true, false], type: "radio"},
+  { ignoreSites: [], desc: "Blocked sites", type: "textarea" },
 ];
 // 默认屏蔽的网站
 export const defaultIgnoreSites = ["shanbay.com", "hjenglish.com", "codepen.io", "jsfiddle.net", "jsbin.com", "codesandbox.io", "github1s.com"];
@@ -1054,6 +1054,117 @@ export const getAuthToken = async () => {
 
   // Last resort: do not treat unauthenticated API errors as logged-in
   return "";
+};
+
+/**
+ * Structured login state for popup / diagnostics.
+ * @returns {Promise<{ loggedIn: boolean, status: 'logged_in'|'logged_out'|'error', message: string }>}
+ */
+export const getAuthStatus = async () => {
+  try {
+    const token = await getAuthToken();
+    if (token && String(token).length) {
+      return {
+        loggedIn: true,
+        status: "logged_in",
+        message: "Logged in to Shanbay",
+      };
+    }
+    return {
+      loggedIn: false,
+      status: "logged_out",
+      message:
+        "Not logged in: open web.shanbay.com and sign in in this browser (Safari users must sign in in Safari, not only Chrome)",
+    };
+  } catch (e) {
+    return {
+      loggedIn: false,
+      status: "error",
+      message: "Could not check login status. Refresh and try again.",
+    };
+  }
+};
+
+/**
+ * Normalize a user selection into a lookup word.
+ * Strips wrapping punctuation/quotes; keeps internal hyphens and apostrophes
+ * (e.g. well-known, don't). Returns null if not a usable English word/phrase.
+ * @param {unknown} raw
+ * @returns {string|null}
+ */
+export const normalizeLookupWord = (raw) => {
+  let s = String(raw == null ? "" : raw).trim();
+  if (!s) return null;
+
+  // Unwrap common quotes
+  s = s.replace(/^["'`“”‘’«»]+|["'`“”‘’«»]+$/g, "").trim();
+  // Strip leading/trailing punctuation & symbols (keep letters for next pass)
+  s = s.replace(/^[^A-Za-z]+/, "").replace(/[^A-Za-z]+$/, "").trim();
+  if (!s) return null;
+
+  // Collapse internal whitespace
+  s = s.replace(/\s+/g, " ");
+
+  // English letters; allow internal hyphen/apostrophe; optional multi-word phrase
+  // well-known | don't | rock-n-roll | New York (two words)
+  if (
+    !/^[A-Za-z]+(?:['’\-][A-Za-z]+)*(?:\s+[A-Za-z]+(?:['’\-][A-Za-z]+)*)*$/.test(
+      s
+    )
+  ) {
+    return null;
+  }
+
+  // Avoid dumping whole paragraphs into the API
+  if (s.length > 64 || s.split(/\s+/).length > 5) return null;
+
+  return s;
+};
+
+/**
+ * Turn API/network failures into clear Chinese messages for the popover.
+ * @param {any} data
+ * @returns {{ status: number, msg: string }}
+ */
+export const formatLookupError = (data) => {
+  if (!data) {
+    return { status: 500, msg: "Lookup failed. Please try again later." };
+  }
+  if (data.message === "Failed to fetch" || data.name === "TypeError") {
+    return {
+      status: 400,
+      msg: "Network error: make sure you are logged into Shanbay in this browser, then refresh the page and try again.",
+    };
+  }
+  const status = Number(data.status) || 500;
+  let msg = data.msg || data.message || data.detail || "Lookup failed";
+  if (typeof msg !== "string") msg = "Lookup failed";
+
+  if (status === 401 || status === 403 || /登录|过期|auth|unauthorized|log\s*in|expired/i.test(msg)) {
+    return {
+      status: status === 403 ? 403 : 401,
+      msg: "Not logged in or session expired. Open web.shanbay.com, sign in, then look up again on this page.",
+    };
+  }
+  if (status === 404 && /登录|过期|log\s*in|expired/i.test(msg)) {
+    return {
+      status: 401,
+      msg: "Not logged in or session expired. Open web.shanbay.com, sign in, then try again.",
+    };
+  }
+  if (status === 504 || /超时|timeout/i.test(msg)) {
+    return {
+      status: 504,
+      msg:
+        msg.includes("web.shanbay")
+          ? msg
+          : "Lookup timed out. Open web.shanbay.com, sign in, keep that tab open, then try again.",
+    };
+  }
+  if (status === 404) {
+    return { status: 404, msg: msg || "Word not found" };
+  }
+  return { status, msg };
 };
 
 /**

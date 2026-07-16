@@ -93,8 +93,8 @@ const getOptions = () => {
           type: 'textarea'
         })
       } else {
-        alert('屏蔽站点格式不正确')
-        throw new Error('屏蔽站点格式不正确')
+        alert('Invalid blocked-site format. Use domains only, e.g. example.com')
+        throw new Error('Invalid blocked-site format')
       }
     }
   })

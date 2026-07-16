@@ -18,9 +18,17 @@ Chrome 商店地址：https://chrome.google.com/webstore/detail/%E6%89%87%E8%B4%
 
 临时扩展（Developer → Add Temporary Extension）在退出 Safari 后会消失。日常使用请用 Xcode 签名安装：
 
+**首次**（配置签名 Team 一次）：
+
 ```bash
 ./scripts/install-safari-permanent.sh
-# 或先 ./scripts/convert-to-safari.sh ，再按 SAFARI.md 配置 Team 并 ⌘R
+# 或 ./scripts/convert-to-safari.sh ，再按 SAFARI.md 配置 Team 并 ⌘R
+```
+
+**以后改代码后一键同步 + 编译 + 启动**（推荐）：
+
+```bash
+./scripts/rebuild-safari.sh
 ```
 
 详见 **[SAFARI.md](./SAFARI.md)**。
@@ -28,13 +36,7 @@ Chrome 商店地址：https://chrome.google.com/webstore/detail/%E6%89%87%E8%B4%
 - 个人本机使用：免费 Apple ID 即可  
 - 上架 App Store：需加入 Apple Developer Program（约 $99/年）  
 - 请在 **Safari** 内登录 [web.shanbay.com](https://web.shanbay.com)，查词时保持扇贝标签页可用更稳妥  
-
-修改 JS/CSS 后同步到 Safari 工程：
-
-```bash
-./scripts/prepare-safari-resources.sh
-# 然后在 Xcode 中再次 Run
-```
+- 工具栏弹窗会显示 **已登录 / 未登录**；未登录时点「去扇贝登录」，登完点「重新检测登录」
 
 ## 提供的功能
 - 单词双击选中自动弹出释义

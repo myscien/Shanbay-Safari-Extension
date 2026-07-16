@@ -5,10 +5,11 @@ import {
   getExtensionSettings,
   playAudio,
   SETTINGS_KEY,
+  normalizeLookupWord,
 } from './const.mjs';
 
 // Bump this string whenever content-script behavior changes — check DevTools console.
-export const CONTENT_BUILD = "2026-07-16-vocab-bold-v5";
+export const CONTENT_BUILD = "2026-07-16-en-ux-v7";
 try {
   const manifestVersion =
     typeof chrome !== "undefined" &&
@@ -17,7 +18,7 @@ try {
       ? chrome.runtime.getManifest().version
       : "?";
   console.info(
-    `%c[扇贝助手] content loaded  build=${CONTENT_BUILD}  manifest=${manifestVersion}`,
+    `%c[Shanbay Helper] content loaded  build=${CONTENT_BUILD}  manifest=${manifestVersion}`,
     "color:#28bea0;font-weight:bold;",
   );
 } catch (_) {
@@ -125,22 +126,19 @@ const storage = Object.assign({}, storageSettingMap);
         ? event.target.getRootNode()
         : document;
       selectionParentBody = (root && root.body) || document.body;
-      let matchResult = getSelection()
-        .toString()
-        .trim()
-        .match(/^[a-zA-Z\s']+$/);
-      if (matchResult) {
-        popover({ loading: true, msg: "查询中...." });
-        debugLogger("info", "get word: ", matchResult[0]);
+      const word = normalizeLookupWord(getSelection().toString());
+      if (word) {
+        popover({ loading: true, msg: "Looking up…" });
+        debugLogger("info", "get word: ", word);
         if (lookupLoadingTimer) clearTimeout(lookupLoadingTimer);
-        // Never leave "查询中" forever (Safari async reply can drop)
+        // Never leave loading forever (Safari async reply can drop)
         lookupLoadingTimer = setTimeout(() => {
           lookupLoadingTimer = null;
           popover({
             loading: false,
             data: {
               status: 504,
-              msg: "查询超时：请打开 web.shanbay.com 并登录，保持标签页打开后重试",
+              msg: "Lookup timed out. Open web.shanbay.com, sign in, keep that tab open, then try again.",
             },
           });
         }, 16000);
@@ -148,7 +146,7 @@ const storage = Object.assign({}, storageSettingMap);
         chrome.runtime.sendMessage(
           {
             action: "lookup",
-            word: matchResult[0],
+            word,
           },
           (response) => {
             if (chrome.runtime.lastError) {
@@ -450,7 +448,7 @@ const storage = Object.assign({}, storageSettingMap);
     }
 
     console.info(
-      `[扇贝助手] popover layout  build=${CONTENT_BUILD}  natural=${naturalHeight}px  max=${maxInnerHeight}px  scroll=${needsScroll}  viewportRatio=${VIEWPORT_HEIGHT_RATIO}`,
+      `[Shanbay Helper] popover layout  build=${CONTENT_BUILD}  natural=${naturalHeight}px  max=${maxInnerHeight}px  scroll=${needsScroll}  viewportRatio=${VIEWPORT_HEIGHT_RATIO}`,
     );
   }
 
@@ -507,10 +505,22 @@ const storage = Object.assign({}, storageSettingMap);
         mainContainer.style.left = window.scrollX + 80 + "px";
       }
     } else if (res.data && res.data.msg) {
+      const st = res.data.status;
+      const msg = String(res.data.msg || "");
+      const needLogin =
+        [400, 401, 403].includes(st) ||
+        /登录|过期|auth|未登录|log\s*in|expired|session/i.test(msg);
+      const loginActions = needLogin
+        ? `<div class="login" style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px;">
+            <a href="https://web.shanbay.com/web/account/login/" target="_blank" class="shanbay-btn">Log in</a>
+            <a href="https://web.shanbay.com/" target="_blank" class="shanbay-btn">Open Shanbay</a>
+          </div>
+          <div style="font-size:12px;color:#999;text-align:center;margin-top:8px;line-height:1.4;">After logging in, refresh this page and look up again</div>`
+        : "";
       mainContainer.querySelector("#shanbay-inner").innerHTML = `
     <div id="shanbay-title" class="has-error">
-      <div class="error-message">${res.data.msg}</div>
-      ${[400, 401, 403, 404].includes(res.data.status) || (res.data.msg && /登录|过期/.test(res.data.msg)) ? '<div class="login"><a href="https://web.shanbay.com/web/account/login/" target="_blank" class="shanbay-btn">去登录</a></div>' : ""}
+      <div class="error-message">${msg}</div>
+      ${loginActions}
     </div>`;
       try {
         calculatePopoverPosition();
@@ -518,7 +528,7 @@ const storage = Object.assign({}, storageSettingMap);
         mainContainer.classList.remove("invisible");
       }
     } else if (!res.data) {
-      mainContainer.querySelector("#shanbay-title").innerHTML = "查询无结果";
+      mainContainer.querySelector("#shanbay-title").innerHTML = "No results";
       try {
         calculatePopoverPosition();
       } catch (e) {
@@ -571,7 +581,7 @@ const storage = Object.assign({}, storageSettingMap);
       const enDefs = Array.isArray(defs.en) ? defs.en : [];
       const cnHtml =
         storage.paraphrase !== "English" && cnDefs.length
-          ? `<div><b>中文：</b> ${cnDefs
+          ? `<div><b>Chinese:</b> ${cnDefs
               .map(
                 (p) =>
                   `<div><span style="color: #333">${formatShanbayHtml(p.pos)} </span><span>${formatShanbayHtml(p.def)}</span></div>`
@@ -580,7 +590,7 @@ const storage = Object.assign({}, storageSettingMap);
           : "";
       const enHtml =
         storage.paraphrase !== "Chinese" && enDefs.length
-          ? `<div><b>英文：</b>${enDefs
+          ? `<div><b>English:</b> ${enDefs
               .map(
                 (p) =>
                   `<div><span style="color: #333">${formatShanbayHtml(p.pos)} </span><span>${formatShanbayHtml(p.def)}</span></div>`
@@ -593,7 +603,7 @@ const storage = Object.assign({}, storageSettingMap);
         contentHtml = `
       <div id="shanbay-title">
           <span class="word">${esc(data.content)}</span>
-          <a class="check-detail" href="https://web.shanbay.com/wordsweb/#/detail/${esc(data.id)}" target="_blank"> 查看详情 </a>
+          <a class="check-detail" href="https://web.shanbay.com/wordsweb/#/detail/${esc(data.id)}" target="_blank"> Details </a>
           <div class="phonetic-symbols">${assemblyPronunciationStr()}</div>
       </div>
       <div id="shanbay-scroll">
@@ -606,13 +616,13 @@ const storage = Object.assign({}, storageSettingMap);
           </div>
       </div>
       <div id="shanbay-footer">
-            <span id="shanbay-example-sentence-span" class="hide"><button type="button" id="shanbay-example-sentence-btn" class="shanbay-btn">查看例句</button></span>
-            ${data.exists === "error" ? "" : `<span id="shanbay-add-word-span"><button type="button" id="shanbay-add-word-btn" class="shanbay-btn ${data.exists ? "forget" : ""}">${data.exists ? "我忘了" : "添加"}</button></span>`}
+            <span id="shanbay-example-sentence-span" class="hide"><button type="button" id="shanbay-example-sentence-btn" class="shanbay-btn">Examples</button></span>
+            ${data.exists === "error" ? "" : `<span id="shanbay-add-word-span"><button type="button" id="shanbay-add-word-btn" class="shanbay-btn ${data.exists ? "forget" : ""}">${data.exists ? "Forgot" : "Add"}</button></span>`}
       </div>
     `;
       } catch (buildErr) {
         debugLogger("error", "build popover HTML failed", buildErr);
-        contentHtml = `<div id="shanbay-title" class="has-error"><div class="error-message">渲染失败: ${esc(buildErr && buildErr.message)}</div></div>`;
+        contentHtml = `<div id="shanbay-title" class="has-error"><div class="error-message">Render error: ${esc(buildErr && buildErr.message)}</div></div>`;
       }
 
       mainContainer.querySelector("#shanbay-inner").innerHTML = contentHtml;
@@ -759,9 +769,9 @@ const storage = Object.assign({}, storageSettingMap);
       case "addOrForget":
         if (addWordSpan) {
           if (res.data && res.data.errors === "SUCCESS") {
-            addWordSpan.innerHTML = "添加失败";
+            addWordSpan.innerHTML = "Add failed";
           } else {
-            addWordSpan.innerHTML = "添加成功";
+            addWordSpan.innerHTML = "Added";
           }
         }
         break;

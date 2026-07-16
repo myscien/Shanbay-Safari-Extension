@@ -8,6 +8,6 @@
     await import(chrome.runtime.getURL("js/main.mjs"));
   } catch (err) {
     // Always log hard load failures (content script cannot import shared debugLogger yet)
-    console.error("[扇贝助手] failed to load content module:", err);
+    console.error("[Shanbay Helper] failed to load content module:", err);
   }
 })();

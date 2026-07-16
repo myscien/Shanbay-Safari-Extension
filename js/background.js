@@ -1,7 +1,8 @@
 import {
   debugLogger, storageSettingMap, lookUp, checkWordAdded,
   addOrForget, getWordExampleSentence, getDailyTaskCount, defaultIgnoreSites,
-  getExtensionSettings, SETTINGS_KEY, getAuthToken
+  getExtensionSettings, SETTINGS_KEY, getAuthToken,
+  normalizeLookupWord, formatLookupError
 } from './const.mjs'
 
 const storage = {}
@@ -84,8 +85,15 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
       } catch (_) {
         /* ignore */
       }
-      const word = req.word
+      const word = normalizeLookupWord(req.word) || String(req.word || '').trim()
       const tabSender = sender
+      if (!word) {
+        replyToSender(tabSender, null, {
+          action: 'lookup',
+          data: { status: 400, msg: 'Please select a valid English word' },
+        })
+        break
+      }
       withTimeout(
         lookUp(word).then((res) =>
           checkWordAdded(res.id)
@@ -102,7 +110,7 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
             })
         ),
         15000,
-        '查询超时：请打开 web.shanbay.com 并登录，保持标签页打开后重试'
+        'Lookup timed out. Open web.shanbay.com, sign in, keep that tab open, then try again.'
       )
         .then((data) => {
           data.__shanbayExtensionSettings = { autoRead: storage.autoRead }
@@ -110,15 +118,7 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
           replyToSender(tabSender, null, { action: 'lookup', data })
         })
         .catch((data) => {
-          let error = {}
-          if (data && data.message === 'Failed to fetch') {
-            error.status = 400
-            error.msg = '请求失败，请登录后刷新本页面'
-          } else if (data && (data.msg || data.status)) {
-            error = data
-          } else {
-            error = { status: 500, msg: (data && data.message) || '查询失败' }
-          }
+          const error = formatLookupError(data)
           replyToSender(tabSender, null, { action: 'lookup', data: error })
         })
       break
@@ -181,16 +181,31 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
       break
     }
     case 'getAuthInfo':
+      // Structured status for popup (also exposes token for legacy checks).
       getAuthToken()
         .then((token) => {
-          debugLogger('log', 'getAuthInfo', token ? '(present)' : '(empty)')
-          sendResponse(token)
+          const loggedIn = !!(token && String(token).length)
+          const payload = {
+            loggedIn,
+            status: loggedIn ? 'logged_in' : 'logged_out',
+            message: loggedIn
+              ? 'Logged in to Shanbay'
+              : 'Not logged in: open web.shanbay.com and sign in in this browser',
+            token: token || '',
+          }
+          debugLogger('log', 'getAuthInfo', payload.status)
+          sendResponse(payload)
         })
         .catch((e) => {
           debugLogger('error', 'getAuthInfo failed', e)
-          sendResponse('')
+          sendResponse({
+            loggedIn: false,
+            status: 'error',
+            message: 'Could not check login status. Refresh and try again.',
+            token: '',
+          })
         })
-      break
+      return true
     case 'authHarvest':
       // Persist any page-visible tokens from shanbay.com (auth-bridge.js)
       try {
@@ -235,7 +250,7 @@ const getDailyTask = () => {
         } else {
           chrome.action.setBadgeText({text: r.total + ''})
           notify({
-            message: `今天还有${r.total}个单词需要复习`,
+            message: `You have ${r.total} word(s) left to review today`,
             url: 'https://web.shanbay.com/wordsweb/#/collection'
           })
         }
@@ -257,8 +272,17 @@ const lookUpBySelection = async (tabId) => {
       func: () => getSelection().toString(),
     });
 
-    // 查询单词
-    const res = await lookUp(result);
+    const word = normalizeLookupWord(result)
+    if (!word) {
+      chrome.tabs.sendMessage(tabId, {
+        action: 'lookup',
+        data: { status: 400, msg: 'Please select a valid English word (hyphens OK, e.g. well-known)' },
+      }).catch(() => {})
+      return
+    }
+
+    // Look up word
+    const res = await lookUp(word);
     const existsRes = await checkWordAdded(res.id);
     res.exists = existsRes.objects[0].exists;
     res.__shanbayExtensionSettings = {autoRead: storage.autoRead};
@@ -267,6 +291,14 @@ const lookUpBySelection = async (tabId) => {
     chrome.tabs.sendMessage(tabId, {action: 'lookup', data: res});
   } catch (e) {
     debugLogger('error', e);
+    try {
+      chrome.tabs.sendMessage(tabId, {
+        action: 'lookup',
+        data: formatLookupError(e),
+      })
+    } catch (_) {
+      /* ignore */
+    }
   }
 }
 
@@ -297,12 +329,20 @@ getExtensionSettings((settings) => {
       debugLogger('info', 'contextMenu added')
       chrome.contextMenus.create({
         id: 'shanbay-lookup-selection',
-        title: '在扇贝网中查找 %s',
+        title: 'Look up “%s” in Shanbay',
         contexts: ['selection'],
       })
       chrome.contextMenus.onClicked.addListener((info, tab) => {
         if (info.menuItemId !== 'shanbay-lookup-selection') return
-        lookUp(info.selectionText)
+        const word = normalizeLookupWord(info.selectionText)
+        if (!word) {
+          chrome.tabs.sendMessage(tab.id, {
+            action: 'lookup',
+            data: { status: 400, msg: 'Please select a valid English word (hyphens OK, e.g. well-known)' },
+          }).catch(() => {})
+          return
+        }
+        lookUp(word)
         .then(res =>
           checkWordAdded(res.id)
             .then(existsRes => {
@@ -320,7 +360,11 @@ getExtensionSettings((settings) => {
           res.__shanbayExtensionSettings = {autoRead: storage.autoRead}
           chrome.tabs.sendMessage(tab.id, {action: 'lookup', data: res}).catch(() => {})
           })
-        .catch(data => chrome.tabs.sendMessage(tab.id, {action: 'lookup', data}).catch(() => {}))
+        .catch(data =>
+          chrome.tabs
+            .sendMessage(tab.id, { action: 'lookup', data: formatLookupError(data) })
+            .catch(() => {})
+        )
       })
     }
   })

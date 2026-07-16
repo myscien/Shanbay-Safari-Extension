@@ -103,11 +103,19 @@ The extension lives inside the **ShanbayHelper.app** container. After a successf
 - You do **not** need Temporary Extension anymore
 - Quitting Safari should **not** remove it
 
-### Update code later
+### Update code later (recommended: one command)
+
+```bash
+./scripts/rebuild-safari.sh
+```
+
+This syncs JS/CSS into the Safari project, runs `xcodebuild`, and opens `ShanbayHelper.app`.
+
+Manual alternative:
 
 ```bash
 ./scripts/prepare-safari-resources.sh
-# then ⌘R in Xcode again (or rebuild)
+# then ⌘R in Xcode again
 ```
 
 ### If the extension disappears again
@@ -162,7 +170,7 @@ After enabling:
 - [ ] Logged into shanbay.com in Safari → popup shows learning actions  
 - [ ] Double-click an English word on a normal webpage → definition popover  
 - [ ] Speaker icons play audio  
-- [ ] Right-click selection → “在扇贝网中查找”  
+- [ ] Right-click selection → “Look up … in Shanbay”  
 - [ ] Options page saves settings  
 
 ## Known Safari caveats
