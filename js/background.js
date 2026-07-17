@@ -78,24 +78,69 @@ const withTimeout = (promise, ms, message) =>
     }),
   ])
 
-chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
-  switch (req.action) {
-    case 'lookup': {
-      // Acknowledge immediately so the message channel does not hang on Safari.
+/**
+ * Open Chrome/Edge side panel on toolbar click.
+ * Safari has no sidePanel API — keeps default_popup (sidepanel.html).
+ */
+const enableSidePanelOnActionClick = () => {
+  if (!chrome.sidePanel || !chrome.sidePanel.setPanelBehavior) return
+  chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: true })
+    .then(() => {
+      // Prefer side panel over the toolbar popup when supported.
       try {
-        sendResponse({ action: 'lookupPending', ok: true })
+        chrome.action.setPopup({ popup: '' })
       } catch (_) {
         /* ignore */
       }
+      debugLogger('info', 'side panel: open on action click')
+    })
+    .catch((e) => debugLogger('warn', 'sidePanel.setPanelBehavior failed', e))
+}
+
+enableSidePanelOnActionClick()
+try {
+  chrome.runtime.onInstalled.addListener(enableSidePanelOnActionClick)
+  chrome.runtime.onStartup.addListener(enableSidePanelOnActionClick)
+} catch (_) {
+  /* ignore */
+}
+
+chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
+  switch (req.action) {
+    case 'lookup': {
       const word = normalizeLookupWord(req.word) || String(req.word || '').trim()
       const tabSender = sender
+      const hasTab = !!(sender && sender.tab && sender.tab.id != null)
+
+      // Content scripts (page popover): ack immediately, deliver final via tabs.sendMessage
+      // so Safari does not drop long async replies on the original channel.
+      // Side panel / popup / options: no tab — single async sendResponse with the result.
+      if (hasTab) {
+        try {
+          sendResponse({ action: 'lookupPending', ok: true })
+        } catch (_) {
+          /* ignore */
+        }
+      }
+
       if (!word) {
-        replyToSender(tabSender, null, {
+        const errPayload = {
           action: 'lookup',
           data: { status: 400, msg: 'Please select a valid English word' },
-        })
+        }
+        if (hasTab) {
+          replyToSender(tabSender, null, errPayload)
+        } else {
+          try {
+            sendResponse(errPayload)
+          } catch (_) {
+            /* ignore */
+          }
+        }
         break
       }
+
       withTimeout(
         lookUp(word).then((res) =>
           checkWordAdded(res.id)
@@ -125,14 +170,32 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
             id: data.id,
             def: snippetFromLookupData(data),
           })
-          // Final result via tabs.sendMessage (reliable after long async work)
-          replyToSender(tabSender, null, { action: 'lookup', data })
+          const payload = { action: 'lookup', data }
+          if (hasTab) {
+            replyToSender(tabSender, null, payload)
+          } else {
+            try {
+              sendResponse(payload)
+            } catch (_) {
+              /* ignore */
+            }
+          }
         })
         .catch((data) => {
           const error = formatLookupError(data)
-          replyToSender(tabSender, null, { action: 'lookup', data: error })
+          const payload = { action: 'lookup', data: error }
+          if (hasTab) {
+            replyToSender(tabSender, null, payload)
+          } else {
+            try {
+              sendResponse(payload)
+            } catch (_) {
+              /* ignore */
+            }
+          }
         })
-      break
+      // Keep channel open for async sendResponse (side panel path)
+      return true
     }
     case 'getRecentLookups':
       getRecentLookups().then((list) => sendResponse({ list }))

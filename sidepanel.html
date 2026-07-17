@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shanbay Helper</title>
+  <link rel="stylesheet" href="css/sidepanel.css" />
+</head>
+<body>
+  <header class="header">
+    <h1>Shanbay Helper</h1>
+    <div id="auth-status" class="checking">…</div>
+  </header>
+  <p id="auth-hint" class="hide"></p>
+
+  <form id="lookup-form" class="search-row" autocomplete="off">
+    <input
+      id="word-input"
+      type="search"
+      name="word"
+      placeholder="Look up a word…"
+      enterkeyhint="search"
+      spellcheck="false"
+      autocapitalize="off"
+      autocorrect="off"
+    />
+    <button id="lookup-btn" type="submit">Look up</button>
+  </form>
+
+  <div class="actions">
+    <button id="begin-learning" class="hide" type="button">Learn</button>
+    <button id="options" class="secondary" type="button">Settings</button>
+    <button id="login" class="hide" type="button">Log in</button>
+  </div>
+
+  <main class="main">
+    <section id="result" class="empty" aria-live="polite">
+      <div class="placeholder">Type a word above, or double-click text on a page</div>
+    </section>
+
+    <section id="recent-section">
+      <h3>
+        <span>Recent</span>
+        <button type="button" id="clear-recent" class="hide" title="Clear history">Clear</button>
+      </h3>
+      <ul id="recent-list"></ul>
+      <p id="recent-empty">No recent words yet</p>
+    </section>
+  </main>
+
+  <p class="footer-hint">Enter to look up · click a recent word to re-look up</p>
+  <script type="module" src="js/sidepanel.mjs"></script>
+</body>
+</html>

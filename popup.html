@@ -1,190 +1,185 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Shanbay Helper</title>
-    <style type="text/css">
-        body {
-            font-family: "PingFangSC-Light", "Helvetica Neue", Helvetica, "Microsoft YaHei", Arial, sans-serif;
-            margin: 0;
-            text-align: center;
-            word-break: keep-all;
-            padding: 8px 12px 16px;
-            min-width: 240px;
-            max-width: 280px;
-            color: #333;
-        }
-        h2 {
-            margin: 8px 0 6px;
-            font-size: 16px;
-            font-weight: 600;
-        }
-        ul {
-            padding: 0;
-            margin: 0;
-        }
-        li {
-            list-style-type: none;
-            white-space: nowrap;
-            margin: 10px 0;
-        }
-        button {
-            background: #209e85;
-            padding: 0 10px;
-            border-radius: 4px;
-            border: none;
-            min-width: 110px;
-            height: 28px;
-            color: #fff;
-            user-select: none;
-            outline: none;
-            cursor: pointer;
-            font-size: 13px;
-        }
-        button.secondary {
-            background: #fff;
-            color: #209e85;
-            border: 1px solid #209e85;
-        }
-        button:disabled {
-            opacity: 0.55;
-            cursor: default;
-        }
-        #auth-status {
-            font-size: 12px;
-            line-height: 1.4;
-            margin: 4px 0 8px;
-            padding: 6px 8px;
-            border-radius: 4px;
-            background: #f5f5f5;
-            white-space: normal;
-            word-break: break-word;
-        }
-        #auth-status.logged_in {
-            background: #e8f7f3;
-            color: #0d7a62;
-        }
-        #auth-status.logged_out,
-        #auth-status.error {
-            background: #fff3f0;
-            color: #c44;
-        }
-        #auth-status.checking {
-            background: #f5f5f5;
-            color: #888;
-        }
-        #auth-hint {
-            font-size: 11px;
-            color: #888;
-            line-height: 1.35;
-            white-space: normal;
-            margin: 0 0 6px;
-            padding: 0 4px;
-        }
-        .hide {
-            display: none !important;
-        }
-        a {
-            color: #209e85;
-            font-size: 12px;
-        }
-        #recent-section {
-            margin-top: 12px;
-            text-align: left;
-            border-top: 1px solid #eee;
-            padding-top: 10px;
-        }
-        #recent-section h3 {
-            margin: 0 0 6px;
-            font-size: 12px;
-            font-weight: 600;
-            color: #666;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        #recent-section h3 button {
-            min-width: auto;
-            height: 22px;
-            font-size: 11px;
-            padding: 0 8px;
-            background: transparent;
-            color: #888;
-            border: 1px solid #ddd;
-        }
-        #recent-list {
-            list-style: none;
-            margin: 0;
-            padding: 0;
-            max-height: 180px;
-            overflow-y: auto;
-        }
-        #recent-list li {
-            margin: 0;
-            white-space: normal;
-        }
-        #recent-list a {
-            display: block;
-            padding: 6px 4px;
-            text-decoration: none;
-            color: #333;
-            border-radius: 4px;
-            font-size: 13px;
-        }
-        #recent-list a:hover {
-            background: #f0faf7;
-        }
-        #recent-list .word {
-            font-weight: 600;
-            color: #209e85;
-        }
-        #recent-list .def {
-            display: block;
-            font-size: 11px;
-            color: #888;
-            margin-top: 2px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        #recent-empty {
-            font-size: 11px;
-            color: #aaa;
-            margin: 4px 0 0;
-            text-align: center;
-        }
-        #shortcuts-hint {
-            font-size: 10px;
-            color: #aaa;
-            margin-top: 10px;
-            line-height: 1.35;
-            white-space: normal;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shanbay Helper</title>
+  <!-- External CSS (Chrome side panel + polished theme). Inline fallback below for Safari. -->
+  <link rel="stylesheet" href="css/sidepanel.css" />
+  <style>
+    /* Hard fallback so the search box is always visible even if CSS fails to load */
+    html, body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, "PingFang SC", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      background: #fff;
+      color: #333;
+    }
+    body {
+      width: 340px;
+      min-height: 280px;
+      padding: 12px 14px 14px;
+      box-sizing: border-box;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+    }
+    #auth-status {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 10px;
+      background: #f5f5f5;
+      color: #666;
+    }
+    #auth-hint { font-size: 11px; color: #888; margin: 0 0 8px; }
+    .search-row {
+      display: flex !important;
+      gap: 6px;
+      margin: 0 0 10px;
+      visibility: visible !important;
+      opacity: 1 !important;
+    }
+    #word-input {
+      flex: 1 1 auto;
+      min-width: 0;
+      height: 36px !important;
+      padding: 0 10px;
+      border: 2px solid #209e85 !important;
+      border-radius: 8px;
+      font-size: 15px !important;
+      background: #fff !important;
+      color: #111 !important;
+      box-sizing: border-box;
+      display: block !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+    }
+    #lookup-btn {
+      flex: 0 0 auto;
+      height: 36px;
+      padding: 0 12px;
+      border: none;
+      border-radius: 8px;
+      background: #209e85;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .actions { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+    .actions button {
+      flex: 0 0 auto;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 4px;
+      border: none;
+      background: #209e85;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .actions button.secondary {
+      background: #fff;
+      color: #209e85;
+      border: 1px solid #209e85;
+    }
+    .hide { display: none !important; }
+    #result {
+      border: 1px solid #eee;
+      border-radius: 10px;
+      padding: 10px;
+      margin-bottom: 10px;
+      background: #f7f9f8;
+      min-height: 48px;
+      font-size: 13px;
+    }
+    #result .placeholder { color: #bbb; text-align: center; padding: 12px 4px; }
+    #recent-section h3 {
+      margin: 0 0 6px;
+      font-size: 11px;
+      color: #888;
+      text-transform: uppercase;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #recent-list { list-style: none; margin: 0; padding: 0; max-height: 140px; overflow-y: auto; }
+    #recent-list button.recent-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      border: none;
+      background: transparent;
+      padding: 6px 4px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    #recent-list button.recent-item:hover { background: #e8f7f3; }
+    #recent-list .word { font-weight: 600; color: #209e85; }
+    #recent-list .def { display: block; font-size: 11px; color: #999; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #recent-empty { font-size: 11px; color: #bbb; text-align: center; }
+    .footer-hint { font-size: 10px; color: #bbb; text-align: center; margin: 8px 0 0; }
+  </style>
 </head>
-<body>
-<div>
-    <h2>Shanbay Helper</h2>
-    <div id="auth-status" class="checking">Checking login…</div>
-    <p id="auth-hint" class="hide"></p>
-    <ul>
-        <li><a href="https://github.com/maicss/chrome-shanbay-v2" target="_blank" rel="noopener">About</a></li>
-        <li><button id="batch-add" class="hide">Batch add words</button></li>
-        <li><button id="begin-learning" class="hide">Start learning</button></li>
-        <li><button id="options" class="hide">Settings</button></li>
-        <li><button id="recheck" class="secondary hide" type="button">Recheck login</button></li>
-        <li><button id="login" class="hide" type="button">Log in to Shanbay</button></li>
-    </ul>
-    <div id="recent-section">
-        <h3>
-            <span>Recent lookups</span>
-            <button type="button" id="clear-recent" class="hide" title="Clear history">Clear</button>
-        </h3>
-        <ul id="recent-list"></ul>
-        <p id="recent-empty">No recent words yet. Double-click a word on a page.</p>
-    </div>
-    <p id="shortcuts-hint">Popover: Esc close · A add · F forget · E examples · 1 UK · 2 US</p>
-</div>
+<body class="is-popup">
+  <header class="header">
+    <h1>Shanbay Helper</h1>
+    <div id="auth-status" class="checking">…</div>
+  </header>
+  <p id="auth-hint" class="hide"></p>
+
+  <!-- Lookup is the main control — always first, always visible -->
+  <form id="lookup-form" class="search-row" autocomplete="off" action="#">
+    <input
+      id="word-input"
+      type="text"
+      name="word"
+      placeholder="Look up a word…"
+      enterkeyhint="search"
+      spellcheck="false"
+      autocapitalize="off"
+      autocorrect="off"
+      autofocus
+    />
+    <button id="lookup-btn" type="submit">Look up</button>
+  </form>
+
+  <div class="actions">
+    <button id="begin-learning" class="hide" type="button">Learn</button>
+    <button id="options" class="secondary" type="button">Settings</button>
+    <button id="login" class="hide" type="button">Log in</button>
+  </div>
+
+  <main class="main">
+    <section id="result" aria-live="polite">
+      <div class="placeholder">Type a word above to look it up</div>
+    </section>
+
+    <section id="recent-section">
+      <h3>
+        <span>Recent</span>
+        <button type="button" id="clear-recent" class="hide" title="Clear history">Clear</button>
+      </h3>
+      <ul id="recent-list"></ul>
+      <p id="recent-empty">No recent words yet</p>
+    </section>
+  </main>
+
+  <p class="footer-hint">Enter to look up · click a recent word to re-look up</p>
+
+  <!-- Chrome uses ES module. Safari prepare script swaps this for a classic IIFE bundle. -->
+  <script type="module" src="js/sidepanel.mjs"></script>
 </body>
-<script type="module" src="js/popup.mjs" charset="UTF-8"></script>
 </html>

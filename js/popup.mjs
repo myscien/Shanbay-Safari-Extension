@@ -57,8 +57,6 @@ function loadRecent() {
 
 function renderUser() {
   const login = document.querySelector('#login')
-  const recheck = document.querySelector('#recheck')
-  const batchAddBtn = document.querySelector('#batch-add')
   const learnBtn = document.querySelector('#begin-learning')
   const settingBtn = document.querySelector('#options')
   const statusEl = document.querySelector('#auth-status')
@@ -67,7 +65,7 @@ function renderUser() {
   const setChecking = () => {
     if (statusEl) {
       statusEl.className = 'checking'
-      statusEl.textContent = 'Checking login…'
+      statusEl.textContent = '…'
     }
     if (hintEl) {
       hintEl.className = 'hide'
@@ -96,10 +94,10 @@ function renderUser() {
       statusEl.className = status
       statusEl.textContent =
         status === 'logged_in'
-          ? '● Logged in'
+          ? 'Logged in'
           : status === 'error'
-            ? '● Status unknown'
-            : '● Not logged in'
+            ? 'Unknown'
+            : 'Not logged in'
     }
 
     if (hintEl) {
@@ -110,20 +108,18 @@ function renderUser() {
         hintEl.className = ''
         hintEl.textContent =
           message ||
-          'Open web.shanbay.com and log in in this browser. Safari users must log in in Safari (Chrome login does not count).'
+          'Open web.shanbay.com and log in in this browser.'
       }
     }
 
-    if (settingBtn) settingBtn.className = ''
-    if (recheck) recheck.className = ''
+    // Settings always visible
+    if (settingBtn) settingBtn.className = 'secondary'
 
     if (loggedIn) {
       if (login) login.className = 'hide'
-      if (batchAddBtn) batchAddBtn.className = ''
       if (learnBtn) learnBtn.className = ''
     } else {
       if (login) login.className = ''
-      if (batchAddBtn) batchAddBtn.className = 'hide'
       if (learnBtn) learnBtn.className = 'hide'
     }
   }
@@ -152,16 +148,7 @@ function renderUser() {
     }
   }
 
-  if (recheck) {
-    recheck.onclick = function () {
-      recheck.disabled = true
-      refreshAuth()
-      setTimeout(() => {
-        recheck.disabled = false
-      }, 600)
-    }
-  }
-
+  // Silent recheck on open / focus (no Recheck button)
   refreshAuth()
   setTimeout(refreshAuth, 800)
 
@@ -181,16 +168,10 @@ document.addEventListener('DOMContentLoaded', function () {
   renderUser()
   loadRecent()
 
-  const batch = document.querySelector('#batch-add')
   const learn = document.querySelector('#begin-learning')
   const options = document.querySelector('#options')
   const clearRecent = document.querySelector('#clear-recent')
 
-  if (batch) {
-    batch.onclick = function () {
-      chrome.tabs.create({ url: 'https://web.shanbay.com/wordsweb/#/collection' })
-    }
-  }
   if (learn) {
     learn.onclick = function () {
       chrome.tabs.create({ url: 'https://web.shanbay.com/wordsweb/#/collection' })
@@ -207,7 +188,6 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
-  // Live-update when a lookup is recorded while popup is open
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && changes[RECENT_LOOKUPS_KEY]) {

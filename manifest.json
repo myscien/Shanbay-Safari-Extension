@@ -1,6 +1,6 @@
 {
   "name": "Shanbay Helper",
-  "version": "2.3.2",
+  "version": "2.4.0",
   "author": "maicss maicss@foxmail.com https://github.com/maicss",
   "manifest_version": 3,
   "description": "Look up words with Shanbay and add them to your vocabulary book",
@@ -18,10 +18,13 @@
   },
   "action": {
     "default_icon": "images/icon_48.png",
-    "default_popup": "popup.html",
+    "default_popup": "sidepanel.html",
     "default_title": "Shanbay Helper"
   },
-  "minimum_chrome_version": "88",
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "minimum_chrome_version": "114",
   "web_accessible_resources": [
     {
       "matches": [
@@ -82,6 +85,7 @@
     "alarms",
     "notifications",
     "scripting",
-    "activeTab"
+    "activeTab",
+    "sidePanel"
   ]
 }

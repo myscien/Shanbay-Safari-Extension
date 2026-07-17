@@ -43,6 +43,27 @@ npx --yes esbuild "$ROOT/js/main.mjs" \
   --format=iife \
   --outfile="$SAFARI_RES/js/content.js"
 
+# Safari popup: ES modules are flaky in extension popups — ship classic IIFE for lookup UI.
+echo "Bundling toolbar popup for Safari..."
+npx --yes esbuild "$ROOT/js/sidepanel.mjs" \
+  --bundle \
+  --format=iife \
+  --outfile="$SAFARI_RES/js/popup-bundle.js"
+
+# Force popup.html to use classic script (not type=module) + text input (Safari-friendly)
+POPUP_HTML="$SAFARI_RES/popup.html"
+if [[ -f "$POPUP_HTML" ]]; then
+  # Replace module script with classic bundle
+  /usr/bin/sed -i '' \
+    's|<script type="module" src="js/sidepanel.mjs"></script>|<script src="js/popup-bundle.js"></script>|' \
+    "$POPUP_HTML"
+  /usr/bin/sed -i '' \
+    's|<script type="module" src="js/popup.mjs"[^>]*></script>|<script src="js/popup-bundle.js"></script>|' \
+    "$POPUP_HTML"
+  # Ensure default_popup path always exists in packaged build
+  echo "Patched popup.html → classic popup-bundle.js"
+fi
+
 # Patch manifest for Safari
 MANIFEST_PATH="$SAFARI_RES/manifest.json" node <<'NODE'
 const fs = require('fs');
@@ -54,11 +75,19 @@ if (manifest.background) {
   delete manifest.background.type;
 }
 
-// notifications / offscreen not supported on Safari
+// notifications / offscreen / sidePanel not supported on Safari
 if (Array.isArray(manifest.permissions)) {
   manifest.permissions = manifest.permissions.filter(
-    (p) => p !== 'notifications' && p !== 'offscreen'
+    (p) => p !== 'notifications' && p !== 'offscreen' && p !== 'sidePanel'
   );
+}
+
+// Chrome Side Panel API is not available in Safari — use toolbar popup instead
+delete manifest.side_panel;
+
+// Always use popup.html on Safari (listed in Xcode project; ships the lookup UI)
+if (manifest.action) {
+  manifest.action.default_popup = 'popup.html';
 }
 
 // Use bundled classic content script (not Chrome's module loader)
