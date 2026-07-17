@@ -357,7 +357,8 @@ body.is-popup {
   margin-bottom: 8px;
 }
 
-#result .simple-definition b {
+/* Section labels only (Chinese / English) — not headword <b class="shanbay-vocab"> */
+#result .simple-definition .def-lang {
   display: block;
   font-size: 11px;
   text-transform: uppercase;
@@ -373,8 +374,14 @@ body.is-popup {
   margin-right: 4px;
 }
 
+/* Shanbay <vocab>…</vocab> → inline bold, same line as the definition */
 #result .def-text b.shanbay-vocab,
-#result .def-text b {
+#result b.shanbay-vocab {
+  display: inline !important;
+  font-size: inherit !important;
+  text-transform: none !important;
+  letter-spacing: normal !important;
+  margin: 0 !important;
   color: var(--sp-text-strong);
   font-weight: 700;
 }

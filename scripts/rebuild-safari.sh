@@ -55,9 +55,21 @@ SCHEME="$(basename "$XCODE_PROJ" .xcodeproj)"
 PROJ_DIR="$(dirname "$XCODE_PROJ")"
 DERIVED="$SAFARI_ROOT/DerivedData"
 
-RES_DIR="$(find "$PROJ_DIR" -type d -path '*/Extension/Resources' 2>/dev/null | head -1 || true)"
+# Folder is usually "ShanbayLookup Extension/Resources" (space before Extension)
+RES_DIR=""
+while IFS= read -r d; do
+  if [[ "$d" == *Extension/Resources ]] || [[ "$d" == *Extension*/Resources ]]; then
+    RES_DIR="$d"
+    break
+  fi
+done < <(find "$PROJ_DIR" -type d -name Resources 2>/dev/null)
+
 if [[ -z "${RES_DIR:-}" ]]; then
+  RES_DIR="$(find "$PROJ_DIR" -type d -name Resources 2>/dev/null | /usr/bin/grep -i '[Ee]xtension' | head -1 || true)"
+fi
+if [[ -z "${RES_DIR:-}" || ! -d "$RES_DIR" ]]; then
   echo "error: Extension/Resources not found under $PROJ_DIR"
+  find "$PROJ_DIR" -maxdepth 4 -type d 2>/dev/null | head -30
   exit 1
 fi
 

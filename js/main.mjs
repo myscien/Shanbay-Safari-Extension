@@ -10,7 +10,7 @@ import {
 } from './const.mjs';
 
 // Bump this string whenever content-script behavior changes — check DevTools console.
-export const CONTENT_BUILD = "2026-07-16-dark-popover-v11";
+export const CONTENT_BUILD = "2026-07-17-vocab-inline-v12";
 
 // Content script entry (ES module). Safari gets an IIFE bundle of this file.
 // Default settings immediately so double-click works before storage returns.

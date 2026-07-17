@@ -276,9 +276,14 @@
     color: var(--sb-text);
 }
 
-/* Headword highlighted from Shanbay <vocab>…</vocab> markup */
+/* Headword from Shanbay <vocab>…</vocab> — stay inline in the sentence */
 #__shanbay-popover b.shanbay-vocab {
+    display: inline !important;
     font-weight: 700 !important;
+    font-size: inherit !important;
+    text-transform: none !important;
+    letter-spacing: normal !important;
+    margin: 0 !important;
     color: var(--sb-text-strong) !important;
 }
 

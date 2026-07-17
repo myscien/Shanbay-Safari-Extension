@@ -269,7 +269,7 @@ function renderWordResult(data) {
 
   const cnHtml =
     settings.paraphrase !== 'English' && cnDefs.length
-      ? `<div><b>Chinese</b>${cnDefs
+      ? `<div><span class="def-lang">Chinese</span>${cnDefs
           .map(
             (p) =>
               `<div><span class="def-pos">${formatShanbayHtml(p.pos)}</span><span class="def-text">${formatShanbayHtml(p.def)}</span></div>`
@@ -279,7 +279,7 @@ function renderWordResult(data) {
 
   const enHtml =
     settings.paraphrase !== 'Chinese' && enDefs.length
-      ? `<div><b>English</b>${enDefs
+      ? `<div><span class="def-lang">English</span>${enDefs
           .map(
             (p) =>
               `<div><span class="def-pos">${formatShanbayHtml(p.pos)}</span><span class="def-text">${formatShanbayHtml(p.def)}</span></div>`
